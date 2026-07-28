@@ -7,18 +7,28 @@ const CW_DEFAULTS = {
   chatworkRoomId: '',
   thresholdEnabled: false,
   thresholdPercent: 80,
-  thresholdMetrics: { currentSession: true, allModels: true, opusOnly: true },
+  thresholdMetrics: { currentSession: true, allModels: true, modelSpecific: true },
   dailyReportEnabled: false,
   morningTime: '09:00',
   eveningTime: '17:00',
+  skipWeekend: true,
   skipHoliday: true
 };
 
+const METRIC_KEYS = ['currentSession', 'allModels', 'modelSpecific'];
+
 const METRIC_LABELS = {
   currentSession: 'Current session（5時間セッション）',
-  allModels: 'All models（週次）',
-  opusOnly: 'Opus only'
+  allModels: 'All models（週次）'
+  // modelSpecificは固定名を持たない（例：Fable等、提供モデルにより変わる）。labelFor()で動的に決める
 };
+
+function labelFor(metricKey, metric) {
+  if (metricKey === 'modelSpecific') {
+    return metric && metric.name ? `${metric.name}（週次・モデル別）` : 'モデル別週次制限';
+  }
+  return METRIC_LABELS[metricKey] || metricKey;
+}
 
 async function cwGetSettings() {
   const stored = await chrome.storage.local.get(Object.keys(CW_DEFAULTS));
@@ -53,7 +63,7 @@ async function checkOneMetricThreshold(metricKey, usageData, settings) {
 
   if (metric.percentage >= settings.thresholdPercent) {
     if (!alreadyNotified) {
-      const label = METRIC_LABELS[metricKey] || metricKey;
+      const label = labelFor(metricKey, metric);
       const body = `[info][title]Claude使用量アラート[/title]${label} が ${metric.percentage}% に達しました（しきい値 ${settings.thresholdPercent}%）。\nリセットまで：${metric.reset || '不明'}[/info]`;
       try {
         await sendChatworkMessage(settings.chatworkToken, settings.chatworkRoomId, body);
@@ -75,7 +85,7 @@ async function checkThresholdAndNotify(usageData) {
   if (!settings.thresholdEnabled || !settings.chatworkToken || !settings.chatworkRoomId) return;
 
   const metrics = settings.thresholdMetrics || {};
-  for (const metricKey of Object.keys(METRIC_LABELS)) {
+  for (const metricKey of METRIC_KEYS) {
     if (!metrics[metricKey]) continue;
     await checkOneMetricThreshold(metricKey, usageData, settings);
   }
@@ -86,11 +96,11 @@ async function checkThresholdAndNotify(usageData) {
 function formatReportMessage(usageData, label) {
   const lines = [`[info][title]Claude使用量レポート（${label}）[/title]`];
   let any = false;
-  for (const key of ['currentSession', 'allModels', 'opusOnly']) {
+  for (const key of METRIC_KEYS) {
     const m = usageData && usageData[key];
     if (m && typeof m.percentage === 'number') {
       any = true;
-      lines.push(`${METRIC_LABELS[key]}：${m.percentage}%（リセット：${m.reset || '不明'}）`);
+      lines.push(`${labelFor(key, m)}：${m.percentage}%（リセット：${m.reset || '不明'}）`);
     }
   }
   if (!any) lines.push('使用量データを取得できませんでした。');
@@ -161,7 +171,7 @@ function dateKey(date) {
 
 async function isWeekendOrHoliday(date, settings) {
   const day = date.getDay(); // 0=日, 6=土
-  if (day === 0 || day === 6) return true;
+  if (settings.skipWeekend !== false && (day === 0 || day === 6)) return true;
   if (!settings.skipHoliday) return false;
   const list = await refreshHolidayListIfNeeded();
   return !!list[dateKey(date)];

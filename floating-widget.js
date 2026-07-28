@@ -540,74 +540,41 @@
     }
   }
 
-  // データを抽出
+  // データを抽出（行単位パース。日本語UI・英語UI両対応、3つ目のモデル別枠は名前を固定せず動的検出）
   function extractUsageData() {
-    const data = {
-      currentSession: null,
-      allModels: null,
-      opusOnly: null
-    };
-
     const pageText = document.body.innerText;
+    const lines = pageText.split(/\n+/).map(s => s.trim()).filter(Boolean);
+    const data = { currentSession: null, allModels: null, modelSpecific: null };
 
-    // Current session
-    const currentMatch = pageText.match(/Current\s+session[^]*?(\d+)%[\s\S]*?使用済み/i) || 
-                         pageText.match(/Current\s+session[^]*?(\d+)%/i);
-    if (currentMatch) {
-      data.currentSession = {
-        percentage: parseInt(currentMatch[1]),
-        reset: extractResetTime('Current session', pageText)
-      };
+    const isSessionLabel = (l) => /現在のセッション/.test(l) || /^Current\s+session/i.test(l);
+    const isAllModelsLabel = (l) => /すべてのモデル/.test(l) || /^All\s+models/i.test(l);
+
+    for (let i = 0; i < lines.length - 2; i++) {
+      const label = lines[i];
+      const resetLine = lines[i + 1];
+      const pctLine = lines[i + 2];
+
+      const resetMatch = resetLine.match(/^(.+?)にリセット$/) || resetLine.match(/^Resets?\s+in\s+(.+)$/i);
+      const pctMatch = pctLine.match(/^(\d+)\s*%\s*(使用済み|used)?/i);
+      if (!resetMatch || !pctMatch) continue;
+
+      const entry = { percentage: parseInt(pctMatch[1], 10), reset: resetMatch[1].trim() };
+
+      if (isSessionLabel(label) && !data.currentSession) {
+        data.currentSession = entry;
+      } else if (isAllModelsLabel(label) && !data.allModels) {
+        data.allModels = entry;
+      } else if (!data.modelSpecific) {
+        data.modelSpecific = { ...entry, name: label };
+      }
+      i += 2;
     }
 
-    // All models
-    const allModelsMatch = pageText.match(/All\s+models[^]*?(\d+)%[\s\S]*?使用済み/i) || 
-                           pageText.match(/All\s+models[^]*?(\d+)%/i);
-    if (allModelsMatch) {
-      data.allModels = {
-        percentage: parseInt(allModelsMatch[1]),
-        reset: extractResetTime('All models', pageText)
-      };
-    }
-
-    // Opus only
-    const opusMatch = pageText.match(/Opus\s+only[^]*?(\d+)%[\s\S]*?使用済み/i) || 
-                      pageText.match(/Opus\s+only[^]*?(\d+)%/i);
-    if (opusMatch) {
-      data.opusOnly = {
-        percentage: parseInt(opusMatch[1]),
-        reset: extractResetTime('Opus only', pageText)
-      };
-    }
-
-    if (!data.currentSession && !data.allModels && !data.opusOnly) {
+    if (!data.currentSession && !data.allModels && !data.modelSpecific) {
       return null; // データが見つからない場合はnullを返す
     }
 
     return data;
-  }
-
-  // リセット時間を抽出
-  function extractResetTime(section, text) {
-    const sectionIndex = text.toLowerCase().indexOf(section.toLowerCase());
-    if (sectionIndex === -1) return '--';
-    
-    const afterSection = text.substring(sectionIndex, sectionIndex + 400);
-    
-    const patterns = [
-      /(\d+時間\d+分後)にリセット/,
-      /(\d+時間後)にリセット/,
-      /(\d+分後)にリセット/,
-      /(\d+:\d+\s*\([^)]+\))にリセット/,
-      /(\d+:\d+\s*\([^)]+\))\s*にリセット/
-    ];
-
-    for (const pattern of patterns) {
-      const match = afterSection.match(pattern);
-      if (match) return match[1];
-    }
-    
-    return '--';
   }
 
   // データを表示
@@ -645,16 +612,16 @@
       `;
     }
 
-    if (data.opusOnly) {
+    if (data.modelSpecific) {
       html += `
         <div class="usage-item opus">
-          <div class="usage-label">Opus Only</div>
+          <div class="usage-label">${data.modelSpecific.name || 'モデル別'}</div>
           <div class="usage-bar">
-            <div class="usage-bar-fill" style="width: ${data.opusOnly.percentage}%"></div>
+            <div class="usage-bar-fill" style="width: ${data.modelSpecific.percentage}%"></div>
           </div>
           <div class="usage-stats">
-            <span class="usage-percentage">${data.opusOnly.percentage}%</span>
-            <span class="usage-reset">${data.opusOnly.reset}</span>
+            <span class="usage-percentage">${data.modelSpecific.percentage}%</span>
+            <span class="usage-reset">${data.modelSpecific.reset}</span>
           </div>
         </div>
       `;
