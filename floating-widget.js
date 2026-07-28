@@ -585,7 +585,7 @@
     if (data.currentSession) {
       html += `
         <div class="usage-item">
-          <div class="usage-label">Current Session</div>
+          <div class="usage-label">Current Session（現在のセッション）</div>
           <div class="usage-bar">
             <div class="usage-bar-fill" style="width: ${data.currentSession.percentage}%"></div>
           </div>
@@ -600,7 +600,7 @@
     if (data.allModels) {
       html += `
         <div class="usage-item">
-          <div class="usage-label">All Models</div>
+          <div class="usage-label">All Models（すべてのモデル）</div>
           <div class="usage-bar">
             <div class="usage-bar-fill" style="width: ${data.allModels.percentage}%"></div>
           </div>
@@ -615,7 +615,7 @@
     if (data.modelSpecific) {
       html += `
         <div class="usage-item opus">
-          <div class="usage-label">${data.modelSpecific.name || 'モデル別'}</div>
+          <div class="usage-label">${data.modelSpecific.name || 'モデル別'}（週次・モデル別）</div>
           <div class="usage-bar">
             <div class="usage-bar-fill" style="width: ${data.modelSpecific.percentage}%"></div>
           </div>
