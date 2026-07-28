@@ -35,15 +35,19 @@
       しきい値（%）
       <input type="number" id="thresholdPercent" min="1" max="100" value="80">
     </label>
-    <label>
-      監視する項目
-      <select id="thresholdMetric">
-        <option value="allModels">All models（週次・全モデル合算）</option>
-        <option value="currentSession">Current session（5時間セッション）</option>
-        <option value="opusOnly">Opus only（Opus専用枠）</option>
-      </select>
+    <label class="checkbox">
+      <input type="checkbox" id="thresholdMetric_currentSession">
+      Current session（5時間セッション）を監視
     </label>
-    <p class="note">同じ超過サイクル中は1回だけ通知します（リセットされて再度超えたら、また通知します）。</p>
+    <label class="checkbox">
+      <input type="checkbox" id="thresholdMetric_allModels">
+      All models（週次・全モデル合算）を監視
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" id="thresholdMetric_opusOnly">
+      Opus only（Opus専用枠）を監視
+    </label>
+    <p class="note">チェックした項目それぞれを個別に監視します（しきい値は共通）。同じ超過サイクル中は項目ごとに1回だけ通知します（リセットされて再度超えたら、また通知します）。</p>
   </section>
 
   <section>

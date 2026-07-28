@@ -3,7 +3,7 @@ const DEFAULTS = {
   chatworkRoomId: '',
   thresholdEnabled: false,
   thresholdPercent: 80,
-  thresholdMetric: 'allModels',
+  thresholdMetrics: { currentSession: true, allModels: true, opusOnly: true },
   dailyReportEnabled: false,
   morningTime: '09:00',
   eveningTime: '17:00',
@@ -18,7 +18,11 @@ function fieldsFromForm() {
     chatworkRoomId: $('chatworkRoomId').value.trim(),
     thresholdEnabled: $('thresholdEnabled').checked,
     thresholdPercent: Number($('thresholdPercent').value) || DEFAULTS.thresholdPercent,
-    thresholdMetric: $('thresholdMetric').value,
+    thresholdMetrics: {
+      currentSession: $('thresholdMetric_currentSession').checked,
+      allModels: $('thresholdMetric_allModels').checked,
+      opusOnly: $('thresholdMetric_opusOnly').checked
+    },
     dailyReportEnabled: $('dailyReportEnabled').checked,
     morningTime: $('morningTime').value || DEFAULTS.morningTime,
     eveningTime: $('eveningTime').value || DEFAULTS.eveningTime,
@@ -31,7 +35,10 @@ function fillForm(settings) {
   $('chatworkRoomId').value = settings.chatworkRoomId;
   $('thresholdEnabled').checked = settings.thresholdEnabled;
   $('thresholdPercent').value = settings.thresholdPercent;
-  $('thresholdMetric').value = settings.thresholdMetric;
+  const metrics = settings.thresholdMetrics || DEFAULTS.thresholdMetrics;
+  $('thresholdMetric_currentSession').checked = !!metrics.currentSession;
+  $('thresholdMetric_allModels').checked = !!metrics.allModels;
+  $('thresholdMetric_opusOnly').checked = !!metrics.opusOnly;
   $('dailyReportEnabled').checked = settings.dailyReportEnabled;
   $('morningTime').value = settings.morningTime;
   $('eveningTime').value = settings.eveningTime;

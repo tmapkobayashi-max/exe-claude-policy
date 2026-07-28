@@ -7,7 +7,7 @@ const CW_DEFAULTS = {
   chatworkRoomId: '',
   thresholdEnabled: false,
   thresholdPercent: 80,
-  thresholdMetric: 'allModels',
+  thresholdMetrics: { currentSession: true, allModels: true, opusOnly: true },
   dailyReportEnabled: false,
   morningTime: '09:00',
   eveningTime: '17:00',
@@ -43,26 +43,22 @@ async function sendChatworkMessage(token, roomId, body) {
 
 // ---- しきい値通知 ----
 
-async function checkThresholdAndNotify(usageData) {
-  if (!usageData) return;
-  const settings = await cwGetSettings();
-  if (!settings.thresholdEnabled || !settings.chatworkToken || !settings.chatworkRoomId) return;
-
-  const metric = usageData[settings.thresholdMetric];
+async function checkOneMetricThreshold(metricKey, usageData, settings) {
+  const metric = usageData[metricKey];
   if (!metric || typeof metric.percentage !== 'number') return;
 
-  const flagKey = `cwNotified_${settings.thresholdMetric}`;
+  const flagKey = `cwNotified_${metricKey}`;
   const flags = await chrome.storage.local.get([flagKey]);
   const alreadyNotified = !!flags[flagKey];
 
   if (metric.percentage >= settings.thresholdPercent) {
     if (!alreadyNotified) {
-      const label = METRIC_LABELS[settings.thresholdMetric] || settings.thresholdMetric;
+      const label = METRIC_LABELS[metricKey] || metricKey;
       const body = `[info][title]Claude使用量アラート[/title]${label} が ${metric.percentage}% に達しました（しきい値 ${settings.thresholdPercent}%）。\nリセットまで：${metric.reset || '不明'}[/info]`;
       try {
         await sendChatworkMessage(settings.chatworkToken, settings.chatworkRoomId, body);
         await chrome.storage.local.set({ [flagKey]: true });
-        console.log('[Claude Usage] Threshold notification sent for', settings.thresholdMetric);
+        console.log('[Claude Usage] Threshold notification sent for', metricKey);
       } catch (err) {
         console.error('[Claude Usage] Failed to send threshold notification:', err);
       }
@@ -70,6 +66,18 @@ async function checkThresholdAndNotify(usageData) {
   } else if (alreadyNotified) {
     // しきい値を下回った＝リセットされたとみなし、次のサイクルに備えてフラグを戻す
     await chrome.storage.local.set({ [flagKey]: false });
+  }
+}
+
+async function checkThresholdAndNotify(usageData) {
+  if (!usageData) return;
+  const settings = await cwGetSettings();
+  if (!settings.thresholdEnabled || !settings.chatworkToken || !settings.chatworkRoomId) return;
+
+  const metrics = settings.thresholdMetrics || {};
+  for (const metricKey of Object.keys(METRIC_LABELS)) {
+    if (!metrics[metricKey]) continue;
+    await checkOneMetricThreshold(metricKey, usageData, settings);
   }
 }
 
