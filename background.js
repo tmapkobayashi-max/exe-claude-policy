@@ -162,32 +162,35 @@ async function fetchUsageDataFromPage() {
   
   // Promiseを作成して保存
   fetchPromise = (async () => {
+    let prevActiveTab = null;
     try {
-      // 既に使用量ページが開いているかチェック（より広範囲に検索）
-      let tabs = await chrome.tabs.query({ url: 'https://claude.ai/settings/usage*' });
-      
-      // 完全一致でも検索
-      if (tabs.length === 0) {
-        tabs = await chrome.tabs.query({ url: 'https://claude.ai/settings/usage' });
-      }
-      
-      let usageTab = tabs.length > 0 ? tabs[0] : null;
+      // 既に使用量ページ(モーダル)が開いているタブを探す。
+      // claude.aiは「/new#settings/usage」「/cowork/project/xxx#settings/usage」など
+      // ベースのページ+ハッシュでモーダルを開く作りなので、パス前方一致ではなく
+      // URL全体に"settings/usage"を含むかで判定する（無関係なタブを誤って掴まないように）。
+      const allClaudeTabs = await chrome.tabs.query({ url: 'https://claude.ai/*' });
+      let usageTab = allClaudeTabs.find(t => t.url && t.url.includes('settings/usage')) || null;
       let wasCreated = false;
-      
-      console.log('[Claude Usage] Found', tabs.length, 'existing usage page tab(s)');
-      
+
+      console.log('[Claude Usage] Found existing usage tab:', !!usageTab);
+
       if (!usageTab) {
-        // 使用量ページが開いていない場合のみ、バックグラウンドで開く
-        console.log('[Claude Usage] Opening usage page in background...');
+        // 使用量ページを新しいタブで開く。
+        // 非表示(active:false)のまま開くとclaude.ai側のモーダルが実際には描画されない
+        // ことが分かったため、一時的に前面化してから元のタブへ戻す。
+        const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        prevActiveTab = active || null;
+
+        console.log('[Claude Usage] Opening usage page (temporarily focused)...');
         usageTab = await chrome.tabs.create({
           url: 'https://claude.ai/settings/usage',
-          active: false // バックグラウンドで開く
+          active: true
         });
         wasCreated = true;
-        
+
         // タブIDを記録
         console.log('[Claude Usage] Created new tab with ID:', usageTab.id);
-        
+
         // ページが完全に読み込まれるまで待機
         await new Promise(resolve => {
           const listener = (tabId, changeInfo) => {
@@ -198,7 +201,7 @@ async function fetchUsageDataFromPage() {
             }
           };
           chrome.tabs.onUpdated.addListener(listener);
-          
+
           // タイムアウト設定（15秒）
           setTimeout(() => {
             chrome.tabs.onUpdated.removeListener(listener);
@@ -207,7 +210,7 @@ async function fetchUsageDataFromPage() {
         });
       } else {
         console.log('[Claude Usage] Using existing usage page tab:', usageTab.id);
-        
+
         // 既存のタブがある場合は、念のため少し待つ
         await new Promise(resolve => setTimeout(resolve, 500));
       }
@@ -275,28 +278,20 @@ async function fetchUsageDataFromPage() {
         checkThresholdAndNotify(usageData).catch(err =>
           console.error('[Claude Usage] checkThresholdAndNotify failed:', err)
         );
-        
-        // バックグラウンドで開いたタブの場合は閉じる
+
+        // 前面化のために作ったタブなら、元のタブへフォーカスを戻してから閉じる
         if (wasCreated) {
-          console.log('[Claude Usage] Closing background tab...');
+          console.log('[Claude Usage] Restoring focus and closing temp tab...');
           setTimeout(async () => {
-            try {
-              await chrome.tabs.remove(usageTab.id);
-            } catch (e) {
-              console.log('[Claude Usage] Tab already closed or removed');
-            }
+            await restoreFocusAndCloseTab(usageTab.id, prevActiveTab);
           }, 500); // 少し遅延させて確実にデータ取得完了後に閉じる
         }
-        
+
         return { usageData, lastUpdate };
       } else {
         // データ取得失敗
         if (wasCreated) {
-          try {
-            await chrome.tabs.remove(usageTab.id);
-          } catch (e) {
-            console.log('[Claude Usage] Could not remove tab');
-          }
+          await restoreFocusAndCloseTab(usageTab.id, prevActiveTab);
         }
         throw new Error('使用量データの取得に失敗しました');
       }
@@ -310,8 +305,24 @@ async function fetchUsageDataFromPage() {
       console.log('[Claude Usage] Fetch completed, flags reset');
     }
   })();
-  
+
   return fetchPromise;
+}
+
+// 一時的に前面化したタブを閉じ、元アクティブだったタブへフォーカスを戻す
+async function restoreFocusAndCloseTab(tempTabId, prevActiveTab) {
+  if (prevActiveTab && prevActiveTab.id !== tempTabId) {
+    try {
+      await chrome.tabs.update(prevActiveTab.id, { active: true });
+    } catch (e) {
+      console.log('[Claude Usage] Could not restore previous active tab (maybe closed)');
+    }
+  }
+  try {
+    await chrome.tabs.remove(tempTabId);
+  } catch (e) {
+    console.log('[Claude Usage] Tab already closed or removed');
+  }
 }
 
 // 拡張機能アイコンのクリックを処理
