@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Claude使用量チェッカー - 設定</title>
+<link rel="stylesheet" href="options.css">
+</head>
+<body>
+<div class="wrap">
+  <h1>Claude使用量チェッカー <span class="sub">Chatwork通知設定</span></h1>
+
+  <section>
+    <h2>1. Chatwork接続設定</h2>
+    <label>
+      APIトークン
+      <input type="password" id="chatworkToken" placeholder="Chatworkの「サービス連携」から発行したAPIトークン" autocomplete="off">
+    </label>
+    <label>
+      ルームID
+      <input type="text" id="chatworkRoomId" placeholder="例：401617013（ルームURLの数字部分）">
+    </label>
+    <div class="row">
+      <button id="testSendBtn" type="button">テスト送信</button>
+      <span id="testResult" class="result"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. しきい値通知</h2>
+    <label class="checkbox">
+      <input type="checkbox" id="thresholdEnabled">
+      使用量がしきい値を超えたらChatworkへ通知する
+    </label>
+    <label>
+      しきい値（%）
+      <input type="number" id="thresholdPercent" min="1" max="100" value="80">
+    </label>
+    <label>
+      監視する項目
+      <select id="thresholdMetric">
+        <option value="allModels">All models（週次・全モデル合算）</option>
+        <option value="currentSession">Current session（5時間セッション）</option>
+        <option value="opusOnly">Opus only（Opus専用枠）</option>
+      </select>
+    </label>
+    <p class="note">同じ超過サイクル中は1回だけ通知します（リセットされて再度超えたら、また通知します）。</p>
+  </section>
+
+  <section>
+    <h2>3. 定時レポート（平日の朝夕）</h2>
+    <label class="checkbox">
+      <input type="checkbox" id="dailyReportEnabled">
+      平日の朝・夕方に、そのときの使用量をChatworkへ送る
+    </label>
+    <div class="row two-col">
+      <label>
+        朝の時刻
+        <input type="time" id="morningTime" value="09:00">
+      </label>
+      <label>
+        夕方の時刻
+        <input type="time" id="eveningTime" value="17:00">
+      </label>
+    </div>
+    <label class="checkbox">
+      <input type="checkbox" id="skipWeekend" checked disabled>
+      土日は送らない（固定）
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" id="skipHoliday" checked>
+      日本の祝日は送らない（内閣府公表データを自動取得・週1回更新）
+    </label>
+    <p class="note">これ以外の不定休（お盆・年末年始など）は判定できません。PC・ブラウザが起動していない時間帯は、そもそも送信されません。</p>
+  </section>
+
+  <div class="row">
+    <button id="saveBtn" type="button" class="primary">保存する</button>
+    <span id="saveResult" class="result"></span>
+  </div>
+</div>
+<script src="options.js"></script>
+</body>
+</html>

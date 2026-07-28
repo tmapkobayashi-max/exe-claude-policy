@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Claude使用量チェッカー（Chatwork通知版）",
+  "description": "Claude.aiの使用量を表示し、しきい値超過時と平日朝夕にChatworkへ通知します",
+  "version": "2.6.1",
+  "permissions": [
+    "storage",
+    "tabs",
+    "alarms",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://claude.ai/*",
+    "https://api.chatwork.com/*",
+    "https://www8.cao.go.jp/*"
+  ],
+  "action": {
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://claude.ai/*"],
+      "js": ["content.js", "floating-widget.js"],
+      "css": ["floating-widget.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options.html",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
