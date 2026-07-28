@@ -129,13 +129,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'testChatworkMessage') {
-    sendChatworkMessage(
-      request.chatworkToken,
-      request.chatworkRoomId,
-      '[info][title]Claude使用量チェッカー[/title]テスト通知です。この文言が届いていれば設定は正常です。[/info]'
-    )
-      .then(() => sendResponse({ success: true }))
-      .catch(error => sendResponse({ success: false, error: error.message }));
+    // 固定の接続確認文言ではなく、実際のレポートと同じ書式・現在のデータで送る。
+    // キャッシュが新しければそれを使い、無ければその場で取得する。
+    (async () => {
+      try {
+        const cached = await chrome.storage.local.get(['usageData', 'lastUpdate']);
+        const cacheAgeMin = cached.lastUpdate ? (Date.now() - cached.lastUpdate) / 60000 : Infinity;
+        let usageData = cached.usageData;
+        if (!usageData || cacheAgeMin > 30) {
+          const fetched = await fetchUsageDataFromPage();
+          usageData = fetched.usageData;
+        }
+        const body = formatReportMessage(usageData, 'テスト送信');
+        await sendChatworkMessage(request.chatworkToken, request.chatworkRoomId, body);
+        sendResponse({ success: true });
+      } catch (error) {
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
     return true; // 非同期レスポンスを有効にする
   }
 
