@@ -30,6 +30,45 @@ function labelFor(metricKey, metric) {
   return METRIC_LABELS[metricKey] || metricKey;
 }
 
+const WEEKDAY_MAP = { '日': 0, '月': 1, '火': 2, '水': 3, '木': 4, '金': 5, '土': 6 };
+
+// "22:00 (水)" のような絶対時刻表記から、今からの残り日数・時間を概算する。
+// セッションの「1時間19分後」のような相対表記は既に分かりやすいのでそのまま使う。
+function estimateRemaining(resetStr) {
+  const m = (resetStr || '').match(/^(\d{1,2}):(\d{2})\s*\(([日月火水木金土])\)$/);
+  if (!m) return null;
+  const [, hh, mm, wd] = m;
+  const targetDay = WEEKDAY_MAP[wd];
+  const targetH = parseInt(hh, 10);
+  const targetM = parseInt(mm, 10);
+  const now = new Date();
+
+  for (let d = 0; d < 8; d++) {
+    const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + d, targetH, targetM, 0, 0);
+    if (candidate.getDay() === targetDay && candidate.getTime() >= now.getTime()) {
+      const totalMinutes = Math.round((candidate.getTime() - now.getTime()) / 60000);
+      const days = Math.floor(totalMinutes / (60 * 24));
+      const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+      if (days > 0) return `約${days}日${hours}時間後`;
+      if (hours > 0) return `約${hours}時間後`;
+      return `約${totalMinutes}分後`;
+    }
+  }
+  return null;
+}
+
+function formatResetDetail(resetStr) {
+  if (!resetStr) return '不明';
+  const approx = estimateRemaining(resetStr);
+  return approx ? `${resetStr}／${approx}` : resetStr;
+}
+
+function formatMetricLine(label, metric) {
+  const remainPct = typeof metric.percentage === 'number' ? 100 - metric.percentage : null;
+  const pctPart = remainPct === null ? `${metric.percentage}%` : `${metric.percentage}%使用（残り${remainPct}%）`;
+  return `${label}：${pctPart}（リセット：${formatResetDetail(metric.reset)}）`;
+}
+
 async function cwGetSettings() {
   const stored = await chrome.storage.local.get(Object.keys(CW_DEFAULTS));
   return { ...CW_DEFAULTS, ...stored };
@@ -64,7 +103,8 @@ async function checkOneMetricThreshold(metricKey, usageData, settings) {
   if (metric.percentage >= settings.thresholdPercent) {
     if (!alreadyNotified) {
       const label = labelFor(metricKey, metric);
-      const body = `[info][title]Claude使用量アラート[/title]${label} が ${metric.percentage}% に達しました（しきい値 ${settings.thresholdPercent}%）。\nリセットまで：${metric.reset || '不明'}[/info]`;
+      const remainPct = 100 - metric.percentage;
+      const body = `[info][title]Claude使用量アラート[/title]${label} が ${metric.percentage}% に達しました（しきい値 ${settings.thresholdPercent}%・残り${remainPct}%）。\nリセットまで：${formatResetDetail(metric.reset)}[/info]`;
       try {
         await sendChatworkMessage(settings.chatworkToken, settings.chatworkRoomId, body);
         await chrome.storage.local.set({ [flagKey]: true });
@@ -100,7 +140,7 @@ function formatReportMessage(usageData, label) {
     const m = usageData && usageData[key];
     if (m && typeof m.percentage === 'number') {
       any = true;
-      lines.push(`${labelFor(key, m)}：${m.percentage}%（リセット：${m.reset || '不明'}）`);
+      lines.push(formatMetricLine(labelFor(key, m), m));
     }
   }
   if (!any) lines.push('使用量データを取得できませんでした。');
