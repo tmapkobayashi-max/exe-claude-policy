@@ -3,9 +3,9 @@
   position: fixed;
   width: 280px;
   background: #ffffff;
-  border: 1px solid #ffb380;
+  border: 1px solid #ffcdce;
   border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(238, 120, 0, 0.2);
+  box-shadow: 0 8px 32px rgba(252, 98, 101, 0.22);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
   z-index: 999999;
   color: #333333;
@@ -35,7 +35,7 @@
   justify-content: space-between;
   align-items: center;
   padding: 12px;
-  background: linear-gradient(135deg, #ee7800 0%, #ff9944 100%);
+  background: linear-gradient(135deg, #fc6265 0%, #ffc93c 100%);
   border-radius: 12px 12px 0 0;
   cursor: move;
 }
@@ -95,8 +95,8 @@
   width: 24px;
   height: 24px;
   margin: 0 auto 8px;
-  border: 2px solid #ffb380;
-  border-top-color: #ee7800;
+  border: 2px solid #ffcdce;
+  border-top-color: #fc6265;
   border-radius: 50%;
   animation: widget-spin 1s linear infinite;
 }
@@ -106,8 +106,8 @@
 }
 
 .usage-item {
-  background: #fff9f5;
-  border: 1px solid #ffb380;
+  background: #fff5f5;
+  border: 1px solid #ffcdce;
   border-radius: 8px;
   padding: 10px;
   margin-bottom: 8px;
@@ -118,8 +118,8 @@
 }
 
 .usage-item.opus {
-  border-color: #ee7800;
-  background: #fff5ed;
+  border-color: #fc6265;
+  background: #fff0f0;
 }
 
 .usage-label {
@@ -132,7 +132,7 @@
 .usage-bar {
   width: 100%;
   height: 6px;
-  background: #ffb380;
+  background: #ffd9da;
   border-radius: 3px;
   overflow: hidden;
   margin-bottom: 6px;
@@ -140,13 +140,13 @@
 
 .usage-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, #FF8766, #F96C4E);
+  background: linear-gradient(90deg, #fc6265, #ffc93c);
   border-radius: 3px;
   transition: width 0.3s ease;
 }
 
 .usage-item.opus .usage-bar-fill {
-  background: linear-gradient(90deg, #FF9977, #F96C4E);
+  background: linear-gradient(90deg, #ff8a8d, #ffc93c);
 }
 
 .usage-stats {
@@ -167,7 +167,7 @@
 
 .widget-footer {
   padding: 8px 12px;
-  border-top: 1px solid #ffb380;
+  border-top: 1px solid #ffcdce;
   font-size: 11px;
   color: #666666;
   text-align: center;
@@ -183,7 +183,7 @@
 .widget-info {
   padding: 12px;
   text-align: center;
-  color: #ee7800;
+  color: #fc6265;
   font-size: 13px;
   line-height: 1.5;
 }
@@ -201,15 +201,15 @@
 }
 
 .widget-content::-webkit-scrollbar-track {
-  background: #fff9f5;
+  background: #fff5f5;
   border-radius: 3px;
 }
 
 .widget-content::-webkit-scrollbar-thumb {
-  background: #ffb380;
+  background: #ffcdce;
   border-radius: 3px;
 }
 
 .widget-content::-webkit-scrollbar-thumb:hover {
-  background: #ff9944;
+  background: #fc6265;
 }

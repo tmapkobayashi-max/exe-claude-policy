@@ -481,7 +481,7 @@
           // メッセージを追加
           const footer = content.querySelector('.widget-footer');
           if (footer) {
-            footer.innerHTML += '<br><small style="color: #ee7800;">🔄ボタンで最新データに更新できます</small>';
+            footer.innerHTML += '<br><small style="color: #fc6265;">🔄ボタンで最新データに更新できます</small>';
           }
         } else {
           // キャッシュが全くない場合
