@@ -1,4 +1,4 @@
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 PINK = (252, 98, 101)
 YELLOW = (255, 201, 60)
@@ -9,6 +9,14 @@ OPUS_BG = (255, 240, 240)
 TEXT_DARK = (51, 51, 51)
 TEXT_GRAY = (102, 102, 102)
 WHITE = (255, 255, 255)
+
+# claude.ai っぽい配色
+PAGE_BG = (245, 244, 238)
+SIDEBAR_BG = (236, 233, 223)
+SIDEBAR_LINE = (223, 219, 206)
+CLAY = (218, 119, 86)          # Claude の terracotta アクセント（近似）
+BUBBLE_GRAY = (233, 231, 224)
+BUBBLE_TEXT = (196, 193, 183)
 
 SCALE = 3
 
@@ -123,37 +131,85 @@ def build_widget():
     card = card.resize((W_CARD, content_h), Image.LANCZOS)
     return card
 
-def build_framed(widget_img):
-    CW, CH = 640, 400
-    canvas = Image.new("RGB", (CW, CH), (245, 243, 239))
+
+def bgfont(path, size):
+    return ImageFont.truetype(path, size)
+
+
+def build_claude_bg(size):
+    CW, CH = size
+    canvas = Image.new("RGB", (CW, CH), PAGE_BG)
     draw = ImageDraw.Draw(canvas)
 
-    top_bar = 28
-    bottom_bezel = 22
-    side_bezel = 22
-    frame_w = widget_img.width + side_bezel * 2
-    frame_h = widget_img.height + top_bar + bottom_bezel
-    fx0 = (CW - frame_w) // 2
-    fy0 = (CH - frame_h) // 2
-    fx1, fy1 = fx0 + frame_w, fy0 + frame_h
-    rounded(draw, [fx0, fy0, fx1, fy1], 18, fill=(30, 30, 32))
+    # 左サイドバー
+    sb_w = 64
+    draw.rectangle([0, 0, sb_w, CH], fill=SIDEBAR_BG)
+    draw.line([sb_w, 0, sb_w, CH], fill=SIDEBAR_LINE, width=1)
 
-    ty = fy0 + 15
-    for i, col in enumerate([(255, 95, 87), (254, 188, 46), (40, 200, 64)]):
-        cx = fx0 + 18 + i * 18
-        draw.ellipse([cx - 5, ty - 5, cx + 5, ty + 5], fill=col)
+    # ロゴマーク（抽象・Claudeを想起させる程度のシンプルな丸型マーク）
+    lm_cx, lm_cy, lm_r = sb_w // 2, 30, 13
+    draw.ellipse([lm_cx - lm_r, lm_cy - lm_r, lm_cx + lm_r, lm_cy + lm_r], fill=CLAY)
+    draw.ellipse([lm_cx - 5, lm_cy - 5, lm_cx + 5, lm_cy + 5], fill=(255, 240, 230))
 
-    wx = fx0 + side_bezel
-    wy = fy0 + top_bar
-    canvas.paste(widget_img, (wx, wy))
-    print("frame", fx0, fy0, fx1, fy1, "widget bottom", wy + widget_img.height, "vs frame bottom", fy1)
+    # サイドバーのナビ項目（抽象）
+    for i in range(5):
+        ny = 78 + i * 34
+        draw.rounded_rectangle([16, ny, sb_w - 16, ny + 18], radius=5, fill=SIDEBAR_LINE)
+
+    # メインエリア：チャット風の吹き出しプレースホルダー
+    fmodel = bgfont(F_REG, 15)
+    draw.text((sb_w + 28, 24), "Claude", font=fmodel, fill=(150, 146, 134))
+
+    bubble_x = sb_w + 28
+    lines = [
+        (bubble_x, 70, 360, 16),
+        (bubble_x, 96, 300, 16),
+        (bubble_x + 40, 140, 260, 40),
+        (bubble_x, 210, 400, 16),
+        (bubble_x, 236, 340, 16),
+        (bubble_x, 262, 200, 16),
+    ]
+    for (x, y, w, h) in lines:
+        draw.rounded_rectangle([x, y, x + w, y + h], radius=8, fill=BUBBLE_GRAY)
+
+    # 下部の入力欄っぽいバー
+    input_margin = 40
+    draw.rounded_rectangle(
+        [sb_w + 24, CH - 46, CW - 24, CH - 18],
+        radius=16, outline=SIDEBAR_LINE, width=2, fill=(250, 249, 245)
+    )
+    draw.text((sb_w + 40, CH - 38), "Claudeにメッセージを送る…", font=bgfont(F_REG, 12), fill=(170, 166, 155))
 
     return canvas
 
+
+def compose(widget_img):
+    CW, CH = 640, 400
+    bg = build_claude_bg((CW, CH))
+
+    margin_top, margin_right = 20, 20
+    wx = CW - widget_img.width - margin_right
+    wy = margin_top
+
+    # ドロップシャドウ
+    shadow = Image.new("RGBA", (CW, CH), (0, 0, 0, 0))
+    sdraw = ImageDraw.Draw(shadow)
+    sdraw.rounded_rectangle(
+        [wx, wy + 6, wx + widget_img.width, wy + widget_img.height + 10],
+        radius=14, fill=(252, 98, 101, 90)
+    )
+    shadow = shadow.filter(ImageFilter.GaussianBlur(10))
+
+    base = bg.convert("RGBA")
+    base = Image.alpha_composite(base, shadow)
+    base.paste(widget_img, (wx, wy), widget_img)
+
+    return base.convert("RGB")
+
+
 widget = build_widget()
-print("widget size", widget.size)
 widget.save(r"C:\Users\tmapk\Desktop\KOMATSUBARA\claude-usage-chatwork\dist\screenshot_raw.png")
 
-framed = build_framed(widget)
+framed = compose(widget)
 framed.save(r"C:\Users\tmapk\Desktop\KOMATSUBARA\claude-usage-chatwork\dist\screenshot_640x400.png")
-print("done")
+print("done", widget.size)
