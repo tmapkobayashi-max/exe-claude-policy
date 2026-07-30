@@ -136,19 +136,12 @@
           // 2回目以降、またはキャッシュがある場合は通常のキャッシュロード
           loadCachedData();
         }
-        
-        // すべてのページで5分ごとに自動更新
-        updateInterval = setInterval(() => {
-          console.log('[Claude Usage Widget] Auto-refresh triggered');
-          chrome.runtime.sendMessage({ action: 'fetchUsageData', reason: 'widget-auto-refresh-5min' }, (response) => {
-            if (response && response.success) {
-              console.log('[Claude Usage Widget] Auto-refresh successful');
-              displayData(response.data, response.lastUpdate);
-            } else {
-              console.log('[Claude Usage Widget] Auto-refresh failed');
-            }
-          });
-        }, 5 * 60 * 1000);
+
+        // 使用量ページ以外では自動更新タイマーを立てない（2026/7/30）。
+        // ここで5分ごとにfetchUsageDataすると、claude.aiの他のページを見ている間も
+        // 裏で使用量ページを取得しに行くことになり、タブが一瞬切り替わる／新規タブが
+        // 開く原因になっていた。表示はキャッシュに留め、更新は🔄ボタンでの手動取得と
+        // 使用量ページへ実際に移動した時（下のURL監視）・定時レポートに任せる。
       });
     }
   }
