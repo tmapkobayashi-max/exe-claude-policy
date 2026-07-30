@@ -159,7 +159,7 @@ async function sendDailyReport(label) {
   }
 
   try {
-    const { usageData } = await fetchUsageDataFromPage();
+    const { usageData } = await fetchUsageDataFromPage(`daily-report-${label === '朝' ? 'morning' : 'evening'}`);
     const body = formatReportMessage(usageData, label);
     await sendChatworkMessage(settings.chatworkToken, settings.chatworkRoomId, body);
     console.log('[Claude Usage] Daily report sent:', label);

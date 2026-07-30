@@ -118,7 +118,7 @@
           chrome.storage.local.set({ hasShownInitialFetch: true });
           
           // データ取得
-          chrome.runtime.sendMessage({ action: 'fetchUsageData' }, (response) => {
+          chrome.runtime.sendMessage({ action: 'fetchUsageData', reason: 'widget-initial-fetch' }, (response) => {
             if (response && response.success) {
               console.log('[Claude Usage Widget] Initial data fetched successfully');
               displayData(response.data, response.lastUpdate);
@@ -140,7 +140,7 @@
         // すべてのページで5分ごとに自動更新
         updateInterval = setInterval(() => {
           console.log('[Claude Usage Widget] Auto-refresh triggered');
-          chrome.runtime.sendMessage({ action: 'fetchUsageData' }, (response) => {
+          chrome.runtime.sendMessage({ action: 'fetchUsageData', reason: 'widget-auto-refresh-5min' }, (response) => {
             if (response && response.success) {
               console.log('[Claude Usage Widget] Auto-refresh successful');
               displayData(response.data, response.lastUpdate);
@@ -202,7 +202,7 @@
           </div>
         `;
         
-        chrome.runtime.sendMessage({ action: 'fetchUsageData' }, (response) => {
+        chrome.runtime.sendMessage({ action: 'fetchUsageData', reason: 'widget-refresh-button' }, (response) => {
           if (response && response.success) {
             console.log('[Claude Usage Widget] Data fetched successfully');
             displayData(response.data, response.lastUpdate);

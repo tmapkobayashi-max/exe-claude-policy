@@ -111,7 +111,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   
   if (request.action === 'fetchUsageData') {
     // 使用量ページからデータを取得
-    fetchUsageDataFromPage()
+    fetchUsageDataFromPage(request.reason || 'message:fetchUsageData')
       .then(data => {
         sendResponse({ success: true, data: data.usageData, lastUpdate: data.lastUpdate });
       })
@@ -137,7 +137,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const cacheAgeMin = cached.lastUpdate ? (Date.now() - cached.lastUpdate) / 60000 : Infinity;
         let usageData = cached.usageData;
         if (!usageData || cacheAgeMin > 30) {
-          const fetched = await fetchUsageDataFromPage();
+          const fetched = await fetchUsageDataFromPage('test-send-button');
           usageData = fetched.usageData;
         }
         const body = formatReportMessage(usageData, 'テスト送信');
@@ -159,21 +159,25 @@ let isFetchingData = false;
 let fetchPromise = null;
 
 // 使用量ページからデータを取得する関数
-async function fetchUsageDataFromPage() {
-  console.log('[Claude Usage] Fetching usage data from page...');
-  
+// reason: どこから呼ばれたか（ログ用。例: 'daily-report-morning', 'widget-message:fetchUsageData', 'test-send-button'）
+async function fetchUsageDataFromPage(reason = 'unknown') {
+  console.log('[Claude Usage] Fetching usage data from page... reason=', reason);
+
   // 既にデータ取得中の場合は、そのPromiseを返す
   if (isFetchingData && fetchPromise) {
     console.log('[Claude Usage] Already fetching data, waiting for existing request...');
     return fetchPromise;
   }
-  
+
   // フラグを設定
   isFetchingData = true;
-  
+
   // Promiseを作成して保存
   fetchPromise = (async () => {
     let prevActiveTab = null;
+    let navigatedTabId = null;
+    let navigatedOriginalUrl = null;
+    let outcome = 'unknown';
     try {
       // 既に使用量ページ(モーダル)が開いているタブを探す。
       // claude.aiは「/new#settings/usage」「/cowork/project/xxx#settings/usage」など
@@ -185,14 +189,52 @@ async function fetchUsageDataFromPage() {
 
       console.log('[Claude Usage] Found existing usage tab:', !!usageTab);
 
-      if (!usageTab) {
-        // 使用量ページを新しいタブで開く。
-        // 非表示(active:false)のまま開くとclaude.ai側のモーダルが実際には描画されない
-        // ことが分かったため、一時的に前面化してから元のタブへ戻す。
-        const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-        prevActiveTab = active || null;
+      const [currentActive] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      prevActiveTab = currentActive || null;
 
-        console.log('[Claude Usage] Opening usage page (temporarily focused)...');
+      if (usageTab) {
+        // 既に使用量ページが開いているタブがあれば、それをそのまま使う（表示への影響なし）。
+        outcome = 'reused-usage-tab';
+        console.log('[Claude Usage] Using existing usage page tab:', usageTab.id);
+
+        // 既存のタブがある場合は、念のため少し待つ
+        await new Promise(resolve => setTimeout(resolve, 500));
+      } else if (allClaudeTabs.length > 0) {
+        // 使用量ページそのもののタブは無いが、claude.aiの別タブは開いている。
+        // 新しいタブを増やさず、既存タブを一時的にナビゲートして使い回す
+        // （2026/7/30：タブが頻繁に一瞬開く問題への対応。新規タブ作成は最終手段にする）。
+        const target = allClaudeTabs.find(t => t.active) || allClaudeTabs[0];
+        navigatedTabId = target.id;
+        navigatedOriginalUrl = target.url;
+        outcome = 'reused-claude-tab-navigated';
+
+        console.log('[Claude Usage] Reusing existing claude.ai tab (temporarily navigating):', target.id);
+        usageTab = await chrome.tabs.update(target.id, {
+          url: 'https://claude.ai/settings/usage',
+          active: true
+        });
+
+        await new Promise(resolve => {
+          const listener = (tabId, changeInfo) => {
+            if (tabId === usageTab.id && changeInfo.status === 'complete') {
+              chrome.tabs.onUpdated.removeListener(listener);
+              setTimeout(resolve, 3000);
+            }
+          };
+          chrome.tabs.onUpdated.addListener(listener);
+
+          setTimeout(() => {
+            chrome.tabs.onUpdated.removeListener(listener);
+            resolve();
+          }, 15000);
+        });
+      } else {
+        // claude.aiのタブが1つも開いていない場合のみ、新規タブを作成する（最終手段）。
+        // 非表示(active:false)のまま開くとclaude.ai側のモーダルが実際には描画されない
+        // ことが分かっているため、一時的に前面化してから元のタブへ戻す。
+        outcome = 'created-new-tab';
+
+        console.log('[Claude Usage] No claude.ai tab open, creating a new one (temporarily focused)...');
         usageTab = await chrome.tabs.create({
           url: 'https://claude.ai/settings/usage',
           active: true
@@ -219,13 +261,8 @@ async function fetchUsageDataFromPage() {
             resolve();
           }, 15000); // 10秒から15秒に延長
         });
-      } else {
-        console.log('[Claude Usage] Using existing usage page tab:', usageTab.id);
-
-        // 既存のタブがある場合は、念のため少し待つ
-        await new Promise(resolve => setTimeout(resolve, 500));
       }
-      
+
       // content scriptが読み込まれているか確認し、必要に応じて注入
       let scriptReady = false;
       try {
@@ -255,28 +292,22 @@ async function fetchUsageDataFromPage() {
           await new Promise(resolve => setTimeout(resolve, 500));
         } catch (injectError) {
           console.error('[Claude Usage] Failed to inject scripts:', injectError);
-          
-          // 自分で作ったタブの場合は閉じる
-          if (wasCreated) {
-            try {
-              await chrome.tabs.remove(usageTab.id);
-            } catch (e) {
-              console.log('[Claude Usage] Could not remove tab');
-            }
-          }
-          
+
+          await cleanupTemporaryTab(usageTab.id, wasCreated, prevActiveTab, navigatedTabId, navigatedOriginalUrl);
+          await logTabEvent(reason, `${outcome}-inject-failed`);
+
           throw new Error('スクリプトの注入に失敗しました');
         }
       }
-      
+
       // データを取得
       console.log('[Claude Usage] Requesting data from content script...');
       const response = await chrome.tabs.sendMessage(usageTab.id, { action: 'getUsageData' });
-      
+
       if (response && response.success) {
         const usageData = response.data;
         const lastUpdate = Date.now();
-        
+
         // データを保存
         await chrome.storage.local.set({
           usageData: usageData,
@@ -290,20 +321,21 @@ async function fetchUsageDataFromPage() {
           console.error('[Claude Usage] checkThresholdAndNotify failed:', err)
         );
 
-        // 前面化のために作ったタブなら、元のタブへフォーカスを戻してから閉じる
-        if (wasCreated) {
-          console.log('[Claude Usage] Restoring focus and closing temp tab...');
+        // 一時的に前面化・ナビゲートしたタブなら、元の状態へ戻す
+        if (wasCreated || navigatedTabId) {
+          console.log('[Claude Usage] Restoring tab/focus after fetch...');
           setTimeout(async () => {
-            await restoreFocusAndCloseTab(usageTab.id, prevActiveTab);
+            await cleanupTemporaryTab(usageTab.id, wasCreated, prevActiveTab, navigatedTabId, navigatedOriginalUrl);
           }, 500); // 少し遅延させて確実にデータ取得完了後に閉じる
         }
+
+        await logTabEvent(reason, `${outcome}-success`);
 
         return { usageData, lastUpdate };
       } else {
         // データ取得失敗
-        if (wasCreated) {
-          await restoreFocusAndCloseTab(usageTab.id, prevActiveTab);
-        }
+        await cleanupTemporaryTab(usageTab.id, wasCreated, prevActiveTab, navigatedTabId, navigatedOriginalUrl);
+        await logTabEvent(reason, `${outcome}-failed`);
         throw new Error('使用量データの取得に失敗しました');
       }
     } catch (error) {
@@ -320,19 +352,45 @@ async function fetchUsageDataFromPage() {
   return fetchPromise;
 }
 
-// 一時的に前面化したタブを閉じ、元アクティブだったタブへフォーカスを戻す
-async function restoreFocusAndCloseTab(tempTabId, prevActiveTab) {
-  if (prevActiveTab && prevActiveTab.id !== tempTabId) {
+// 一時的に前面化・流用したタブの後始末。
+// wasCreated=true なら新規作成したタブを閉じる。navigatedTabId があれば
+// （既存の別タブを一時的にナビゲートしただけなので）閉じずに元のURLへ戻す。
+// どちらの場合も、フォーカスを奪った元アクティブタブがあれば戻す。
+async function cleanupTemporaryTab(tabId, wasCreated, prevActiveTab, navigatedTabId, navigatedOriginalUrl) {
+  if (navigatedTabId && navigatedOriginalUrl) {
+    try {
+      await chrome.tabs.update(navigatedTabId, { url: navigatedOriginalUrl });
+    } catch (e) {
+      console.log('[Claude Usage] Could not restore navigated tab URL (maybe closed)');
+    }
+  }
+  if (prevActiveTab && prevActiveTab.id !== tabId) {
     try {
       await chrome.tabs.update(prevActiveTab.id, { active: true });
     } catch (e) {
       console.log('[Claude Usage] Could not restore previous active tab (maybe closed)');
     }
   }
+  if (wasCreated) {
+    try {
+      await chrome.tabs.remove(tabId);
+    } catch (e) {
+      console.log('[Claude Usage] Tab already closed or removed');
+    }
+  }
+}
+
+// タブ作成・流用の記録を残す（診断用）。直近200件までstorage.localに保持する。
+const TAB_ACTIVITY_LOG_MAX = 200;
+async function logTabEvent(reason, outcome) {
   try {
-    await chrome.tabs.remove(tempTabId);
+    const { tabActivityLog } = await chrome.storage.local.get(['tabActivityLog']);
+    const log = Array.isArray(tabActivityLog) ? tabActivityLog : [];
+    log.push({ time: Date.now(), reason, outcome });
+    while (log.length > TAB_ACTIVITY_LOG_MAX) log.shift();
+    await chrome.storage.local.set({ tabActivityLog: log });
   } catch (e) {
-    console.log('[Claude Usage] Tab already closed or removed');
+    console.error('[Claude Usage] Failed to write tab activity log:', e);
   }
 }
 

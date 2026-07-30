@@ -1,21 +1,53 @@
 body {
   font-family: "Yu Gothic", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
-  background: #f5f3ef;
+  background: #eeece6;
   color: #222;
   margin: 0;
   padding: 32px;
 }
-.wrap { max-width: 560px; margin: 0 auto; }
-h1 { font-size: 20px; margin: 0 0 24px; }
+.wrap { max-width: 880px; margin: 0 auto; }
+h1 { font-size: 20px; margin: 0 0 22px; }
 h1 .sub { display: block; font-size: 13px; color: #8a6d3b; font-weight: normal; margin-top: 4px; }
-section {
-  background: #fff;
-  border: 1px solid #e0dcd3;
-  border-radius: 8px;
-  padding: 18px 20px;
-  margin-bottom: 18px;
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 18px;
+  align-items: start;
 }
-h2 { font-size: 15px; margin: 0 0 14px; color: #8a6d3b; }
+
+.card {
+  background: #fff;
+  border: 1px solid #e6e2d8;
+  border-radius: 12px;
+  padding: 20px 22px 22px;
+  box-shadow: 0 1px 2px rgba(30, 24, 8, 0.04), 0 4px 14px rgba(30, 24, 8, 0.05);
+}
+.card--full { grid-column: 1 / -1; }
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f0ede4;
+}
+.card-num {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #b08d4f;
+  color: #fff;
+  font-size: 12px;
+  font-weight: bold;
+}
+.card-head h2 { font-size: 15px; margin: 0; color: #4a3d24; }
+
 label {
   display: block;
   font-size: 13px;
@@ -42,8 +74,10 @@ label.checkbox {
   gap: 8px;
 }
 label.checkbox input { margin: 0; }
-.row { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.row { display: flex; align-items: center; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
 .row.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.row.save-row { margin: 22px 0 0; }
+
 button {
   font-size: 13px;
   padding: 8px 16px;
@@ -63,3 +97,32 @@ button:hover { opacity: .88; }
 .result.ok { color: #2a7a3b; }
 .result.ng { color: #b3261e; }
 .note { font-size: 12px; color: #8a8577; margin: 6px 0 0; line-height: 1.6; }
+
+.log-table-wrap {
+  margin-top: 12px;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid #f0ede4;
+  border-radius: 8px;
+}
+.log-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.log-table thead th {
+  position: sticky;
+  top: 0;
+  background: #f8f6f1;
+  text-align: left;
+  padding: 8px 10px;
+  color: #8a8577;
+  font-weight: normal;
+  border-bottom: 1px solid #f0ede4;
+}
+.log-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid #f5f3ed;
+  white-space: nowrap;
+}
+.log-table tr:last-child td { border-bottom: none; }
+.log-table td.log-quiet { color: #2a7a3b; }
+.log-table td.log-flash { color: #b3261e; font-weight: bold; }
+.log-table td.log-fail { color: #b3261e; }
+.log-empty { color: #8a8577; text-align: center; padding: 16px 0 !important; white-space: normal !important; }

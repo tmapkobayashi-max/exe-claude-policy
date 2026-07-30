@@ -53,6 +53,62 @@ async function load() {
   fillForm({ ...DEFAULTS, ...stored });
 }
 
+// ---- 動作ログ（診断用） ----
+
+const OUTCOME_LABELS = {
+  'reused-usage-tab-success': '既存の使用量タブを利用（表示への影響なし）',
+  'reused-claude-tab-navigated-success': '既存のclaude.aiタブを一時流用（新規タブなし）',
+  'created-new-tab-success': '新規タブを作成（一瞬表示された）',
+  'reused-usage-tab-failed': '既存タブ利用→取得失敗',
+  'reused-claude-tab-navigated-failed': '既存タブ流用→取得失敗',
+  'created-new-tab-failed': '新規タブ作成→取得失敗',
+  'reused-usage-tab-inject-failed': '既存タブ利用→スクリプト注入失敗',
+  'reused-claude-tab-navigated-inject-failed': '既存タブ流用→スクリプト注入失敗',
+  'created-new-tab-inject-failed': '新規タブ作成→スクリプト注入失敗'
+};
+
+function formatLogTime(ts) {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function outcomeClass(outcome) {
+  if (outcome.startsWith('created-new-tab')) return 'log-flash';
+  if (outcome.includes('failed')) return 'log-fail';
+  return 'log-quiet';
+}
+
+async function renderLog() {
+  const { tabActivityLog } = await chrome.storage.local.get(['tabActivityLog']);
+  const log = Array.isArray(tabActivityLog) ? tabActivityLog : [];
+  const tbody = $('logTableBody');
+  tbody.innerHTML = '';
+  if (!log.length) {
+    tbody.innerHTML = '<tr><td colspan="3" class="log-empty">記録はまだありません</td></tr>';
+    return;
+  }
+  [...log].reverse().forEach(entry => {
+    const tr = document.createElement('tr');
+    const label = OUTCOME_LABELS[entry.outcome] || entry.outcome;
+    const time = document.createElement('td');
+    time.textContent = formatLogTime(entry.time);
+    const reason = document.createElement('td');
+    reason.textContent = entry.reason;
+    const outcome = document.createElement('td');
+    outcome.textContent = label;
+    outcome.className = outcomeClass(entry.outcome);
+    tr.append(time, reason, outcome);
+    tbody.appendChild(tr);
+  });
+}
+
+$('refreshLogBtn').addEventListener('click', renderLog);
+$('clearLogBtn').addEventListener('click', async () => {
+  await chrome.storage.local.set({ tabActivityLog: [] });
+  renderLog();
+});
+
 // ---- CSVエクスポート/インポート ----
 
 function csvEscape(value) {
@@ -205,3 +261,4 @@ $('testSendBtn').addEventListener('click', async () => {
 });
 
 load();
+renderLog();
