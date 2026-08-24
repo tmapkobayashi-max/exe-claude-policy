@@ -96,7 +96,10 @@
       <p class="note">使用量データを取得するたびに記録されます。「新規タブを作成」は画面が一瞬切り替わる動作、それ以外（既存タブ利用／一時流用）は新しいタブを開かずに取得できたことを示します。</p>
       <div class="row">
         <button id="refreshLogBtn" type="button">更新</button>
+        <button id="copyFailLogBtn" type="button">失敗だけコピー</button>
+        <button id="copyLogBtn" type="button">全部コピー</button>
         <button id="clearLogBtn" type="button">クリア</button>
+        <span id="copyResult" class="result"></span>
       </div>
       <div class="log-table-wrap">
         <table class="log-table">

@@ -158,6 +158,71 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 let isFetchingData = false;
 let fetchPromise = null;
 
+// ページ読み込み完了後、モーダルの描画を待つ時間。
+// かつては3秒固定で待って1回だけ取得していたが、描画が間に合わないと
+// そのまま失敗していた（2026/8/3朝の欠測）。いまは短く待ってからポーリングする。
+const PAGE_SETTLE_MS = 1000;
+// 使用量データが取れるまで粘る上限と、その間隔。
+const USAGE_POLL_TIMEOUT_MS = 20000;
+const USAGE_POLL_INTERVAL_MS = 1000;
+
+// 使用量データを、取れるまで（最大 USAGE_POLL_TIMEOUT_MS）繰り返し要求する。
+// claude.aiの使用量モーダルは描画完了のタイミングが読めないため、
+// 「何秒待てば確実」と決め打ちせず、取れた時点で抜ける方式にしている。
+async function requestUsageDataWithPolling(tabId, timeoutMs = USAGE_POLL_TIMEOUT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  let attempt = 0;
+  let lastIssue = null;
+
+  while (Date.now() < deadline) {
+    attempt++;
+    try {
+      const response = await chrome.tabs.sendMessage(tabId, { action: 'getUsageData' });
+      if (response && response.success && response.data) {
+        console.log('[Claude Usage] Usage data obtained on attempt', attempt);
+        return response;
+      }
+      lastIssue = (response && response.error) || 'データが空でした';
+    } catch (e) {
+      // タブがまだ応答しない（描画中・content script初期化中）ケース
+      lastIssue = e && e.message ? e.message : String(e);
+    }
+    await new Promise(resolve => setTimeout(resolve, USAGE_POLL_INTERVAL_MS));
+  }
+
+  console.log('[Claude Usage] Usage data polling timed out after', attempt, 'attempts. lastIssue=', lastIssue);
+  return null;
+}
+
+// タブの読み込み完了を待つ。完了後、モーダルの描画の頭出しぶんだけ追加で待つ。
+function waitForTabComplete(tabId, timeoutMs = 15000) {
+  return new Promise(resolve => {
+    let timer = null;
+    const listener = (id, changeInfo) => {
+      if (id !== tabId || changeInfo.status !== 'complete') return;
+      chrome.tabs.onUpdated.removeListener(listener);
+      clearTimeout(timer);
+      setTimeout(resolve, PAGE_SETTLE_MS);
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    timer = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }, timeoutMs);
+  });
+}
+
+// 使用量ページ単体(/settings/usage)のタブかどうか。
+// 会話ページ+ハッシュ(/chat/xxx#settings/usage)は、読み込み直すと書きかけの入力が消えるため、
+// 「そのまま読み直してよいタブ」からは外す。
+function isStandaloneUsageUrl(url) {
+  try {
+    return new URL(url).pathname.startsWith('/settings/usage');
+  } catch (e) {
+    return false;
+  }
+}
+
 // 使用量ページからデータを取得する関数
 // reason: どこから呼ばれたか（ログ用。例: 'daily-report-morning', 'widget-message:fetchUsageData', 'test-send-button'）
 async function fetchUsageDataFromPage(reason = 'unknown') {
@@ -184,7 +249,10 @@ async function fetchUsageDataFromPage(reason = 'unknown') {
       // ベースのページ+ハッシュでモーダルを開く作りなので、パス前方一致ではなく
       // URL全体に"settings/usage"を含むかで判定する（無関係なタブを誤って掴まないように）。
       const allClaudeTabs = await chrome.tabs.query({ url: 'https://claude.ai/*' });
-      let usageTab = allClaudeTabs.find(t => t.url && t.url.includes('settings/usage')) || null;
+      // Chrome起動直後は、セッション復元されたタブが discarded（未読込）のまま残っている。
+      // discarded なタブには chrome.scripting で注入できず「注入失敗」になるため、
+      // 「そのまま使う」候補からは外す（2026/8/3朝、これで定時レポートが欠測した）。
+      let usageTab = allClaudeTabs.find(t => t.url && isStandaloneUsageUrl(t.url) && !t.discarded) || null;
       let wasCreated = false;
 
       console.log('[Claude Usage] Found existing usage tab:', !!usageTab);
@@ -193,17 +261,25 @@ async function fetchUsageDataFromPage(reason = 'unknown') {
       prevActiveTab = currentActive || null;
 
       if (usageTab) {
-        // 既に使用量ページが開いているタブがあれば、それをそのまま使う（表示への影響なし）。
-        outcome = 'reused-usage-tab';
-        console.log('[Claude Usage] Using existing usage page tab:', usageTab.id);
+        // 使用量ページのタブが開いていても、モーダルの「残り◯時間◯分」は開いた時点の表示のまま
+        // 止まっている。読み直さずに拾うと、何時間も前の値をそのままChatworkへ流してしまう
+        // （2026/8/19：9:23のアラートと9:30の定時レポートが揃って「12時間39分後」を出した）。
+        // 再利用するときは必ず読み込み直す。対象は /settings/usage 単体ページに限っているので、
+        // 会話の書きかけを巻き込む心配はない。
+        outcome = 'reused-usage-tab-reloaded';
+        console.log('[Claude Usage] Reloading existing usage tab for fresh values:', usageTab.id);
 
-        // 既存のタブがある場合は、念のため少し待つ
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await chrome.tabs.reload(usageTab.id);
+        await waitForTabComplete(usageTab.id);
       } else if (allClaudeTabs.length > 0) {
         // 使用量ページそのもののタブは無いが、claude.aiの別タブは開いている。
         // 新しいタブを増やさず、既存タブを一時的にナビゲートして使い回す
         // （2026/7/30：タブが頻繁に一瞬開く問題への対応。新規タブ作成は最終手段にする）。
-        const target = allClaudeTabs.find(t => t.active) || allClaudeTabs[0];
+        // ナビゲートする場合は discarded でも問題ない（URLを更新すれば読み込まれる）が、
+        // 読み込み済みのタブがあればそちらを優先する。
+        const target = allClaudeTabs.find(t => t.active && !t.discarded)
+          || allClaudeTabs.find(t => !t.discarded)
+          || allClaudeTabs[0];
         navigatedTabId = target.id;
         navigatedOriginalUrl = target.url;
         outcome = 'reused-claude-tab-navigated';
@@ -218,7 +294,8 @@ async function fetchUsageDataFromPage(reason = 'unknown') {
           const listener = (tabId, changeInfo) => {
             if (tabId === usageTab.id && changeInfo.status === 'complete') {
               chrome.tabs.onUpdated.removeListener(listener);
-              setTimeout(resolve, 3000);
+              // ここは軽く待つだけでよい。描画待ちは後段のポーリングが引き受ける。
+              setTimeout(resolve, PAGE_SETTLE_MS);
             }
           };
           chrome.tabs.onUpdated.addListener(listener);
@@ -249,8 +326,8 @@ async function fetchUsageDataFromPage(reason = 'unknown') {
           const listener = (tabId, changeInfo) => {
             if (tabId === usageTab.id && changeInfo.status === 'complete') {
               chrome.tabs.onUpdated.removeListener(listener);
-              // ページのJavaScriptが実行されるまでさらに待つ
-              setTimeout(resolve, 3000); // 2秒から3秒に延長
+              // ここは軽く待つだけでよい。描画待ちは後段のポーリングが引き受ける。
+              setTimeout(resolve, PAGE_SETTLE_MS);
             }
           };
           chrome.tabs.onUpdated.addListener(listener);
@@ -300,13 +377,17 @@ async function fetchUsageDataFromPage(reason = 'unknown') {
         }
       }
 
-      // データを取得
-      console.log('[Claude Usage] Requesting data from content script...');
-      const response = await chrome.tabs.sendMessage(usageTab.id, { action: 'getUsageData' });
+      // データを取得。モーダルの描画完了は待ち時間を決め打ちできないため、
+      // 取れるまでポーリングする（2026/8/3：3秒固定・1回きりで間に合わず欠測した）。
+      console.log('[Claude Usage] Requesting data from content script (polling)...');
+      const response = await requestUsageDataWithPolling(usageTab.id);
 
       if (response && response.success) {
         const usageData = response.data;
         const lastUpdate = Date.now();
+        // いつ時点の数値かを一緒に持ち回る。Chatworkへ出す残り時間は、
+        // この時刻を基準に送信の瞬間へ計算し直す（chatwork-notify.js の resolveResetAt）。
+        usageData.capturedAt = lastUpdate;
 
         // データを保存
         await chrome.storage.local.set({
@@ -507,8 +588,16 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 
   if (alarm.name === 'dailyMorningReport' || alarm.name === 'dailyEveningReport') {
-    handleDailyAlarm(alarm.name).catch(err =>
+    handleDailyAlarm(alarm.name, alarm.scheduledTime).catch(err =>
       console.error('[Claude Usage] handleDailyAlarm failed:', err)
+    );
+    return;
+  }
+
+  // 定時レポートの再試行（取得失敗から60秒後。chatwork-notify.js側で予約している）
+  if (alarm.name.startsWith(DAILY_REPORT_RETRY_PREFIX)) {
+    handleDailyReportRetryAlarm(alarm.name, alarm.scheduledTime).catch(err =>
+      console.error('[Claude Usage] handleDailyReportRetryAlarm failed:', err)
     );
   }
 });

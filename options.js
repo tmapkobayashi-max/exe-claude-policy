@@ -64,7 +64,10 @@ const OUTCOME_LABELS = {
   'created-new-tab-failed': '新規タブ作成→取得失敗',
   'reused-usage-tab-inject-failed': '既存タブ利用→スクリプト注入失敗',
   'reused-claude-tab-navigated-inject-failed': '既存タブ流用→スクリプト注入失敗',
-  'created-new-tab-inject-failed': '新規タブ作成→スクリプト注入失敗'
+  'created-new-tab-inject-failed': '新規タブ作成→スクリプト注入失敗',
+  'retry-scheduled-1': '取得失敗→60秒後に再試行を予約（1回目）',
+  'retry-scheduled-2': '取得失敗→60秒後に再試行を予約（2回目）',
+  'gave-up-after-retries': '再試行しても取得できず、レポート送信を断念'
 };
 
 function formatLogTime(ts) {
@@ -74,6 +77,8 @@ function formatLogTime(ts) {
 }
 
 function outcomeClass(outcome) {
+  if (outcome === 'gave-up-after-retries') return 'log-fail';
+  if (outcome.startsWith('retry-scheduled')) return 'log-flash';
   if (outcome.startsWith('created-new-tab')) return 'log-flash';
   if (outcome.includes('failed')) return 'log-fail';
   return 'log-quiet';
@@ -103,7 +108,45 @@ async function renderLog() {
   });
 }
 
+// 失敗・再試行まわりの記録かどうか（「失敗だけコピー」の絞り込み用）
+function isTroubleOutcome(outcome) {
+  return outcome.includes('failed')
+    || outcome.startsWith('retry-scheduled')
+    || outcome === 'gave-up-after-retries';
+}
+
+// 表と同じ3列を、そのまま貼り付けられるタブ区切りテキストにする
+function logRowsToText(entries) {
+  const header = ['時刻', 'きっかけ', '結果'].join('\t');
+  const lines = entries.map(e => [
+    formatLogTime(e.time),
+    e.reason,
+    OUTCOME_LABELS[e.outcome] || e.outcome
+  ].join('\t'));
+  return [header, ...lines].join('\n');
+}
+
+async function copyLog(onlyTrouble) {
+  const { tabActivityLog } = await chrome.storage.local.get(['tabActivityLog']);
+  const log = Array.isArray(tabActivityLog) ? tabActivityLog : [];
+  // 画面と同じ「新しい順」で出す
+  const target = [...log].reverse().filter(e => !onlyTrouble || isTroubleOutcome(e.outcome));
+
+  if (!target.length) {
+    showResult($('copyResult'), true, onlyTrouble ? '失敗の記録はありません' : '記録はまだありません');
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(logRowsToText(target));
+    showResult($('copyResult'), true, `${target.length}件コピーしました`);
+  } catch (err) {
+    showResult($('copyResult'), false, 'コピーに失敗しました：' + err.message);
+  }
+}
+
 $('refreshLogBtn').addEventListener('click', renderLog);
+$('copyFailLogBtn').addEventListener('click', () => copyLog(true));
+$('copyLogBtn').addEventListener('click', () => copyLog(false));
 $('clearLogBtn').addEventListener('click', async () => {
   await chrome.storage.local.set({ tabActivityLog: [] });
   renderLog();
