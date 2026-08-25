@@ -193,11 +193,16 @@ async function checkOneMetricThreshold(metricKey, usageData, settings) {
       const remainPct = 100 - metric.percentage;
       const body = `[info][title]🔴 Claude使用量アラート｜${label}[/title]使用${metric.percentage}%／残り${remainPct}% ${usageBar(metric.percentage)}（しきい値 ${settings.thresholdPercent}% に到達）
 リセット：${formatResetDetail(metric.reset, usageData.capturedAt)}[/info]`;
+      // ★送る前にフラグを立てる（2026/8/25）。
+      // 送ってから立てると、送信中（数百ミリ秒）に入ってきた別の呼び出しが
+      // 「まだ通知していない」と読んでしまい、同じアラートが2通出る。
+      // 失敗したときは戻すので、送れなかったのに黙るということは起きない。
+      await chrome.storage.local.set({ [flagKey]: true });
       try {
         await sendChatworkMessage(settings.chatworkToken, settings.chatworkRoomId, body);
-        await chrome.storage.local.set({ [flagKey]: true });
         console.log('[Claude Usage] Threshold notification sent for', metricKey);
       } catch (err) {
+        await chrome.storage.local.set({ [flagKey]: false });
         console.error('[Claude Usage] Failed to send threshold notification:', err);
       }
     }
@@ -207,7 +212,26 @@ async function checkOneMetricThreshold(metricKey, usageData, settings) {
   }
 }
 
+// ★同時に走らせない（2026/8/25）。
+// この関数は2か所から呼ばれる。
+//   ❶ データ取得のたび（background.js の取得処理の末尾。await していない）
+//   ❷ 定時レポートの送信直後（下の handleDailyReport）
+// 朝9:30のレポートは❷の中で取得を走らせるので、❶と❷がほぼ同時に始まる。
+// 前後関係が保証されないため、両方が「まだ通知していない」と読んで2通送っていた。
+// 直前の実行が終わるまで待たせて、1本ずつ通す。
+let cwThresholdChain = Promise.resolve();
+
 async function checkThresholdAndNotify(usageData) {
+  const run = cwThresholdChain.then(
+    () => checkThresholdAndNotifyInner(usageData),
+    () => checkThresholdAndNotifyInner(usageData)
+  );
+  // 失敗しても鎖は切らない（次の呼び出しが止まってしまうため）
+  cwThresholdChain = run.catch(() => {});
+  return run;
+}
+
+async function checkThresholdAndNotifyInner(usageData) {
   if (!usageData) return;
   const settings = await cwGetSettings();
   if (!settings.thresholdEnabled || !settings.chatworkToken || !settings.chatworkRoomId) return;
