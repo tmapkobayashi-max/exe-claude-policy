@@ -223,6 +223,14 @@ async function peekAccountChange(usageData) {
 
   if (!first && previous === current) return { line: '', current, changed: false };
 
+  // ★2026/9/4：メールアドレスを読むのをやめたので、
+  // 前回の値がメールで今回が表示名なら、それは「アカウントが変わった」のではなく
+  // こちらの作りが変わっただけ。黙って覚え直す（メールをもう一度Chatworkへ出さない）。
+  if (previous && String(previous).indexOf('@') !== -1 && current && String(current).indexOf('@') === -1) {
+    await commitAccount(current);
+    return { line: '', current, changed: false };
+  }
+
   const label = current || 'アカウント不明';
   const line = first
     ? `👤 このレポートのアカウント：${label}`

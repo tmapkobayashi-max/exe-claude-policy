@@ -1,4 +1,4 @@
-# Claude使用量チェッカー Chrome拡張機能 v2.6
+# Claude使用量チェッカー Chrome拡張機能 v2.6.13
 
 Claude.aiの使用量を簡単に確認できるChrome拡張機能です。
 

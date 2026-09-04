@@ -434,7 +434,7 @@ async function paintAccount() {
   } else {
     main.textContent = 'アカウント不明';
     bar.classList.add('is-unknown');
-    bits.push('ページからメールアドレスを読み取れませんでした。下の欄に表示名を入れておくと、そちらを使います');
+    bits.push('ページから表示名を読み取れませんでした。下の欄に名前を入れておくと、そちらを使います');
   }
 
   if (captured) bits.push('数値の取得：' + fmtClock(captured));
@@ -451,11 +451,7 @@ async function paintAccount() {
 
 // どこから拾えたか。取れないときの切り分けに使う。
 const SOURCE_LABELS = {
-  menu: 'アカウントメニュー（開いていたので、メールアドレスが取れました）',
-  name: 'アカウントメニューのボタン',
-  text: '見えている本文',
-  attr: '画面の属性',
-  html: 'ページの埋め込みデータ'
+  name: 'アカウントメニューのボタン'
 };
 
 function fmtClock(ts) {

@@ -636,36 +636,20 @@
     return data;
   }
 
-  // ---- どのアカウントの数字か（2026/9/4・実物のDOMを見て作り直し）----
-  // 🔴 なぜ最初「アカウント不明」だったか：
-  //    メールアドレスは、アカウントメニューを**開いたときだけ**DOMに現れる
-  //    （[data-testid="user-menu-header"]）。閉じている間はページのどこにも無い。
-  //    → 本文をいくら探しても見つからないのは当たり前だった。
-  // ⭐ 代わりに、いつでも出ているものがある＝メニューの**ボタン**。
-  //    アバターに aria-label="うつぼや"、その隣に「うつぼや · Max」。
-  //    「誰の数字か」を知るには、メールアドレスより、こちらのほうが素直で確実。
-  // ⚠️ data-testid は予告なく変わりうる。変わったら下の順番で自然に次へ落ち、
-  //    最後は設定画面の手入力（accountManual）が受け止める。黙って壊れない。
-  // ⚠️ トップレベルに const を置かない。拡張を再読み込みすると既存タブへ再注入されることがあり、
-  //    そのとき「already been declared」で注入ごと失敗して、コンテンツスクリプトが動かなくなる。
-  function pickEmail(text) {
-    if (!text) return null;
-    const ACCOUNT_IGNORE = /^(support|noreply|no-reply|help|info|privacy|security|legal|press|sales|example|test)@/i;
-    const ACCOUNT_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
-    const found = String(text).match(ACCOUNT_RE);
-    if (!found) return null;
-    for (const m of found) {
-      if (ACCOUNT_IGNORE.test(m)) continue;
-      if (/@(anthropic|sentry|google|gstatic|w3\.org)\./i.test(m)) continue;
-      if (/\.(png|jpg|svg|css|js)$/i.test(m)) continue;
-      return m;
-    }
-    return null;
-  }
+  // ---- どのアカウントの数字か（2026/9/4・メールを読むのをやめた版）----
+  // 数字だけだと、誰の数字かが見えない。アカウントを切り替えると黙って別人の数字が出る。
+  //
+  // 🔴 メールアドレスは読まない（2026/9/4 方針）。
+  //    ・そもそもメニューを開いている間しかDOMに無く、ほぼ取れない
+  //    ・取れなくても、メニューのボタンにある表示名（例：うつぼや（Max））で用は足りる
+  //    ・個人を特定できる情報を持たないほうが、扱いも申告も簡単
+  //    → 読むのは「表示名」だけ。取れなければ、設定画面の手入力を使う。
+  //
+  // 🚫 非公開API（/api/bootstrap 等）も呼ばない。ページにあるものを読むだけ。
+  // ⚠️ data-testid は予告なく変わりうる。変わったら null を返し、手入力が受け止める。
 
   // アイコンフォントの字を落とす。
-  // Unicodeの私用領域（U+E000〜U+F8FF）にアイコンが割り当てられており、
-  // 見た目は空でも文字としては1文字あるため、素通りさせると空カッコになる。
+  // Unicodeの私用領域にアイコンが割り当てられており、見た目が空でも文字数を持つ。
   function cleanLabel(t) {
     return String(t || '').replace(/[\uE000-\uF8FF]/g, '').replace(/\s+/g, ' ').trim();
   }
@@ -680,10 +664,9 @@
     const parts = Array.from(btn.querySelectorAll('span'))
       .filter(e => e.children.length === 0)
       .map(e => cleanLabel(e.textContent))
-      // 「文字か数字を1つでも含む」ものだけ残す。
-      // アイコンフォントの字は私用領域なので \p{L} にも \p{N} にも当たらない。
-      // ⚠️ length で弾くだけでは足りない（U+FFFF より上のアイコンは length 2 になる）。
-      .filter(t => t !== '·' && /[\p{L}\p{N}]/u.test(t) && t.length >= 2);
+      // 文字か数字を1つでも含むものだけ残す。アイコンの字は私用領域なので
+      // \p{L} にも \p{N} にも当たらない（U+FFFF より上でも効く）。
+      .filter(t => t !== '\u00b7' && /[\p{L}\p{N}]/u.test(t) && t.length >= 2);
 
     const avatar = btn.querySelector('[data-cds="Avatar"]');
     let name = avatar ? cleanLabel(avatar.getAttribute('aria-label')) : '';
@@ -692,46 +675,15 @@
     }
     if (!name) return null;
 
-    // プラン名（Max など）があれば添える。無ければ名前だけ返す＝空カッコを作らない。
+    // プラン名（Max など）があれば添える。無ければ名前だけ＝空カッコを作らない。
     const plan = parts.find(t => t !== name && t.length <= 12);
-    return plan ? name + '（' + plan + '）' : name;
+    return plan ? name + '\uff08' + plan + '\uff09' : name;
   }
 
-  // 戻り値は { email, source }。source は診断用（設定画面に出す）。
+  // 戻り値は { email, source }。email には表示名が入る（メールアドレスは入れない）。
   function extractAccount() {
-    // ❶ メニューが開いていれば、メールアドレスがそのまま取れる
-    const header = document.querySelector('[data-testid="user-menu-header"]');
-    if (header) {
-      const hit = pickEmail(header.textContent);
-      if (hit) return { email: hit, source: 'menu' };
-    }
-
-    // ❷ メニューのボタン（閉じていても常にある）
     const name = accountFromMenuButton();
     if (name) return { email: name, source: 'name' };
-
-    // ❸ 見えている本文
-    let hit = pickEmail(document.body.innerText);
-    if (hit) return { email: hit, source: 'text' };
-
-    // ❹ 属性（title / aria-label など）
-    for (const el of document.querySelectorAll('[title],[aria-label],[alt],[data-email]')) {
-      hit = pickEmail(
-        (el.getAttribute('title') || '') + ' ' +
-        (el.getAttribute('aria-label') || '') + ' ' +
-        (el.getAttribute('alt') || '') + ' ' +
-        (el.getAttribute('data-email') || '')
-      );
-      if (hit) return { email: hit, source: 'attr' };
-    }
-
-    // ❺ ページに埋め込まれたHTML／JSON
-    try {
-      const html = document.documentElement.innerHTML;
-      hit = pickEmail(html.length > 3000000 ? html.slice(0, 3000000) : html);
-      if (hit) return { email: hit, source: 'html' };
-    } catch (e) { /* 読めなければ諦める */ }
-
     return { email: null, source: null };
   }
 
@@ -802,7 +754,7 @@
 
     // 誰の数字かを1行。取れなければ「アカウント不明」と正直に出す（黙って空にしない）
     html += `
-      <div class="widget-account" title="${data.account ? '使用量ページから読み取ったアカウント' : 'ページからメールアドレスを読み取れませんでした'}">
+      <div class="widget-account" title="${data.account ? '使用量ページから読み取ったアカウント' : 'アカウントメニューから表示名を読み取れませんでした'}">
         👤 ${data.account ? escapeHtml(data.account) : 'アカウント不明'}
       </div>
     `;
