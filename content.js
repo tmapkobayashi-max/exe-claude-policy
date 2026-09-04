@@ -91,11 +91,12 @@ function parseUsageBlocks(pageText) {
 //    「誰の数字か」を知るには、メールアドレスより、こちらのほうが素直で確実。
 // ⚠️ data-testid は予告なく変わりうる。変わったら下の順番で自然に次へ落ち、
 //    最後は設定画面の手入力（accountManual）が受け止める。黙って壊れない。
-const ACCOUNT_IGNORE = /^(support|noreply|no-reply|help|info|privacy|security|legal|press|sales|example|test)@/i;
-const ACCOUNT_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
-
+// ⚠️ トップレベルに const を置かない。拡張を再読み込みすると既存タブへ再注入されることがあり、
+//    そのとき「already been declared」で注入ごと失敗して、コンテンツスクリプトが動かなくなる。
 function pickEmail(text) {
   if (!text) return null;
+  const ACCOUNT_IGNORE = /^(support|noreply|no-reply|help|info|privacy|security|legal|press|sales|example|test)@/i;
+  const ACCOUNT_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
   const found = String(text).match(ACCOUNT_RE);
   if (!found) return null;
   for (const m of found) {
@@ -124,7 +125,10 @@ function accountFromMenuButton() {
   const parts = Array.from(btn.querySelectorAll('span'))
     .filter(e => e.children.length === 0)
     .map(e => cleanLabel(e.textContent))
-    .filter(t => t.length >= 2 && t !== '·');
+    // 「文字か数字を1つでも含む」ものだけ残す。
+    // アイコンフォントの字は私用領域なので \p{L} にも \p{N} にも当たらない。
+    // ⚠️ length で弾くだけでは足りない（U+FFFF より上のアイコンは length 2 になる）。
+    .filter(t => t !== '·' && /[\p{L}\p{N}]/u.test(t) && t.length >= 2);
 
   const avatar = btn.querySelector('[data-cds="Avatar"]');
   let name = avatar ? cleanLabel(avatar.getAttribute('aria-label')) : '';
