@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Claude使用量チェッカー（Chatwork通知版）",
   "description": "Claude.aiの使用量を表示し、しきい値超過時と平日朝夕にChatworkへ通知します",
-  "version": "2.6.10",
+  "version": "2.6.11",
   "permissions": [
     "storage",
     "tabs",

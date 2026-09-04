@@ -8,7 +8,10 @@ const DEFAULTS = {
   morningTime: '09:00',
   eveningTime: '17:00',
   skipWeekend: true,
-  skipHoliday: true
+  skipHoliday: true,
+  notificationsMuted: false,
+  snoozeUntil: 0,
+  accountManual: ''
 };
 
 const $ = (id) => document.getElementById(id);
@@ -28,7 +31,11 @@ function fieldsFromForm() {
     morningTime: $('morningTime').value || DEFAULTS.morningTime,
     eveningTime: $('eveningTime').value || DEFAULTS.eveningTime,
     skipWeekend: $('skipWeekend').checked,
-    skipHoliday: $('skipHoliday').checked
+    skipHoliday: $('skipHoliday').checked,
+    // ⚠️ マスターオフは即時保存だが、「保存する」でも一緒に書く。
+    //    ここに含めないと、保存のたびに false へ戻ってしまう。
+    notificationsMuted: $('notificationsMuted').checked,
+    accountManual: $('accountManual').value.trim()
   };
 }
 
@@ -46,6 +53,55 @@ function fillForm(settings) {
   $('eveningTime').value = settings.eveningTime;
   $('skipWeekend').checked = settings.skipWeekend;
   $('skipHoliday').checked = settings.skipHoliday;
+  $('notificationsMuted').checked = !!settings.notificationsMuted;
+  $('accountManual').value = settings.accountManual || '';
+  paintMuteState();
+}
+
+// ---- 通知を止める（2026/9/4）----
+// 「いま止まっているか」を、探さずに分かる形で出す。
+// ⭐ 止めたこと自体を忘れるのがいちばん怖いので、状態は必ず文字で書く。
+async function paintMuteState() {
+  const { snoozeUntil } = await chrome.storage.local.get(['snoozeUntil']);
+  const muted = $('notificationsMuted').checked;
+  const until = Number(snoozeUntil) || 0;
+  const snoozed = until > Date.now();
+
+  const card = document.querySelector('.card--mute');
+  if (card) card.classList.toggle('is-muted', muted || snoozed);
+
+  const state = $('snoozeState');
+  const btn = $('snoozeBtn');
+  if (muted) {
+    state.textContent = '「通知を全部止める」がオンです';
+    state.className = 'result is-active';
+    btn.disabled = true;
+    btn.textContent = '今日はもう送らない';
+    return;
+  }
+  btn.disabled = false;
+  if (snoozed) {
+    const d = new Date(until);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    state.textContent = `今日は送りません（${d.getMonth() + 1}/${d.getDate()} ${hh}:${mm} に再開）`;
+    state.className = 'result is-active';
+    btn.textContent = '今すぐ送信を再開する';
+  } else {
+    state.textContent = '';
+    state.className = 'result';
+    btn.textContent = '今日はもう送らない';
+  }
+}
+
+function computeSnoozeUntil(morningTime) {
+  const parts = String(morningTime || '09:00').split(':');
+  const h = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  const until = new Date();
+  until.setDate(until.getDate() + 1);
+  until.setHours(isNaN(h) ? 9 : h, isNaN(m) ? 0 : m, 0, 0);
+  return until.getTime();
 }
 
 async function load() {
@@ -232,7 +288,9 @@ function csvToSettings(text) {
     morningTime: map.morningTime || DEFAULTS.morningTime,
     eveningTime: map.eveningTime || DEFAULTS.eveningTime,
     skipWeekend: toBool(map.skipWeekend),
-    skipHoliday: toBool(map.skipHoliday)
+    skipHoliday: toBool(map.skipHoliday),
+    notificationsMuted: toBool(map.notificationsMuted),
+    accountManual: map.accountManual || DEFAULTS.accountManual
   };
 }
 
@@ -282,6 +340,7 @@ $('saveBtn').addEventListener('click', async () => {
   await chrome.storage.local.set(settings);
   chrome.runtime.sendMessage({ action: 'settingsUpdated' });
   showResult($('saveResult'), true, '保存しました');
+  paintMuteState();
 });
 
 $('testSendBtn').addEventListener('click', async () => {
@@ -303,5 +362,124 @@ $('testSendBtn').addEventListener('click', async () => {
   }
 });
 
+// ---- 通知を止める（2026/9/4）----
+// ⭐ マスターオフだけは「保存する」を待たずに即時反映する。
+//    止めたいときは今すぐ止まってほしいのに、保存を押し忘れて鳴り続ける、が起きるため。
+$('notificationsMuted').addEventListener('change', async () => {
+  await chrome.storage.local.set({ notificationsMuted: $('notificationsMuted').checked });
+  chrome.runtime.sendMessage({ action: 'settingsUpdated' });
+  paintMuteState();
+});
+
+$('snoozeBtn').addEventListener('click', async () => {
+  const { snoozeUntil } = await chrome.storage.local.get(['snoozeUntil']);
+  const snoozed = (Number(snoozeUntil) || 0) > Date.now();
+  if (snoozed) {
+    await chrome.storage.local.set({ snoozeUntil: 0 });
+  } else {
+    // 「朝の時刻」は画面の値を使う（保存前に変えていても、見えているとおりに効く）
+    await chrome.storage.local.set({ snoozeUntil: computeSnoozeUntil($('morningTime').value) });
+  }
+  paintMuteState();
+});
+
+// 別の場所（ウィジェットの🔔）で変えられたら、開いている設定画面も追従させる
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local') return;
+  if (changes.usageData || changes.cwLastSeenAccount) paintAccount();
+  if (changes.snoozeUntil || changes.notificationsMuted) {
+    if (changes.notificationsMuted) {
+      $('notificationsMuted').checked = !!changes.notificationsMuted.newValue;
+    }
+    paintMuteState();
+  }
+});
+
+
+// ---- どのアカウントの数字か（2026/9/4）----
+// 数字だけだと誰の数字かが見えない。アカウントを切り替えると黙って別人の数字が出る。
+// ここは「いま拾えているアカウント」を、設定を触る前に見せるための行。
+// ⚠️ Chatworkの通知は「変わったときだけ」1行出す作りなので、
+//    ふだんは通知に出ない。だからこの画面ではいつでも見えるようにしておく。
+async function paintAccount() {
+  const { usageData, lastUpdate, cwLastSeenAccount, accountManual } =
+    await chrome.storage.local.get(['usageData', 'lastUpdate', 'cwLastSeenAccount', 'accountManual']);
+
+  const bar = $('acctBar');
+  const main = $('acctMain');
+  const sub = $('acctSub');
+  if (!bar || !main || !sub) return;
+
+  const auto = (usageData && usageData.account) || null;
+  const source = (usageData && usageData.accountSource) || null;
+  const manual = (accountManual || '').trim();
+  const captured = (usageData && usageData.capturedAt) || lastUpdate || null;
+
+  bar.classList.remove('is-unknown', 'is-pending');
+
+  if (!usageData) {
+    main.textContent = 'まだ使用量を取得していません';
+    sub.textContent = 'claude.ai の使用量ページを開くか、「取得し直す」を押してください';
+    bar.classList.add('is-unknown');
+    return;
+  }
+
+  const bits = [];
+  if (auto) {
+    main.textContent = auto;
+    bits.push('claude.aiのページから自動で読み取り（' + (SOURCE_LABELS[source] || '取得元不明') + '）');
+  } else if (manual) {
+    main.textContent = manual;
+    bits.push('手入力の表示名を使っています（ページからは読み取れませんでした）');
+  } else {
+    main.textContent = 'アカウント不明';
+    bar.classList.add('is-unknown');
+    bits.push('ページからメールアドレスを読み取れませんでした。下の欄に表示名を入れておくと、そちらを使います');
+  }
+
+  if (captured) bits.push('数値の取得：' + fmtClock(captured));
+
+  // Chatworkへ最後に知らせたものと食い違っていたら、次の通知で「変わりました」が出る
+  const effective = auto || manual || null;
+  if (cwLastSeenAccount !== undefined && cwLastSeenAccount !== effective) {
+    bar.classList.add('is-pending');
+    bits.push('⚠️ Chatworkへ最後に知らせたのは「' + (cwLastSeenAccount || 'アカウント不明') +
+      '」です（次の通知で「変わりました」を1行出します）');
+  }
+  sub.textContent = bits.join(' ／ ');
+}
+
+// どこから拾えたか。取れないときの切り分けに使う。
+const SOURCE_LABELS = {
+  menu: 'アカウントメニュー（開いていたので、メールアドレスが取れました）',
+  name: 'アカウントメニューのボタン',
+  text: '見えている本文',
+  attr: '画面の属性',
+  html: 'ページの埋め込みデータ'
+};
+
+function fmtClock(ts) {
+  const d = new Date(ts);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+$('accountManual').addEventListener('input', () => {
+  // 打っている最中に見た目が変わると分かりやすいので、保存を待たずに反映する。
+  // ⚠️ 保存されるのは「保存する」を押したとき（fieldsFromForm に入れてある）。
+  chrome.storage.local.set({ accountManual: $('accountManual').value.trim() }, paintAccount);
+});
+
+$('acctRefreshBtn').addEventListener('click', () => {
+  const btn = $('acctRefreshBtn');
+  btn.disabled = true;
+  btn.textContent = '取得中…';
+  chrome.runtime.sendMessage({ action: 'fetchUsageData', reason: 'options-account-refresh' }, () => {
+    btn.disabled = false;
+    btn.textContent = '取得し直す';
+    paintAccount();
+  });
+});
+
 load();
 renderLog();
+paintAccount();

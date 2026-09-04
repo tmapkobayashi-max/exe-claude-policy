@@ -11,7 +11,7 @@
 
   <div class="grid">
 
-    <section class="card card--full">
+    <section class="card">
       <div class="card-head">
         <span class="card-num">1</span>
         <h2>Chatwork接続設定</h2>
@@ -53,9 +53,9 @@
       </label>
       <label class="checkbox">
         <input type="checkbox" id="thresholdMetric_modelSpecific">
-        モデル別の週次制限を監視（自動検出。現在の対象は状況により変わります）
+        モデル別の週次制限を監視（自動検出）
       </label>
-      <p class="note">チェックした項目それぞれを個別に監視します（しきい値は共通）。同じ超過サイクル中は項目ごとに1回だけ通知します（リセットされて再度超えたら、また通知します）。</p>
+      <p class="note">チェックした項目それぞれを個別に監視します（しきい値は共通）。同じ超過サイクル中は項目ごとに1回だけ通知します。</p>
     </section>
 
     <section class="card">
@@ -83,35 +83,50 @@
       </label>
       <label class="checkbox">
         <input type="checkbox" id="skipHoliday" checked>
-        日本の祝日は送らない（内閣府公表データを自動取得・週1回更新）
+        日本の祝日は送らない（内閣府データを自動取得）
       </label>
-      <p class="note">これ以外の不定休（お盆・年末年始など）は判定できません。PC・ブラウザが起動していない時間帯は、そもそも送信されません。</p>
+      <p class="note">お盆・年末年始などの不定休は判定できません。PC・ブラウザが起動していない時間帯は送信されません。</p>
     </section>
 
-    <section class="card card--full">
+    <section class="card card--mute">
       <div class="card-head">
         <span class="card-num">4</span>
-        <h2>動作ログ（診断用）</h2>
+        <h2>通知を止める</h2>
       </div>
-      <p class="note">使用量データを取得するたびに記録されます。「新規タブを作成」は画面が一瞬切り替わる動作、それ以外（既存タブ利用／一時流用）は新しいタブを開かずに取得できたことを示します。</p>
+      <label class="checkbox checkbox--strong">
+        <input type="checkbox" id="notificationsMuted">
+        <strong>通知を全部止める</strong>（自分で戻すまでオフ）
+      </label>
+      <p class="note">しきい値も定時レポートも送りません。<strong>これだけは「保存する」を押さなくてもすぐ効きます。</strong>⚠️ 自動では戻りません。</p>
       <div class="row">
-        <button id="refreshLogBtn" type="button">更新</button>
-        <button id="copyFailLogBtn" type="button">失敗だけコピー</button>
-        <button id="copyLogBtn" type="button">全部コピー</button>
-        <button id="clearLogBtn" type="button">クリア</button>
-        <span id="copyResult" class="result"></span>
+        <button id="snoozeBtn" type="button">今日はもう送らない</button>
+        <span id="snoozeState" class="result"></span>
       </div>
-      <div class="log-table-wrap">
-        <table class="log-table">
-          <thead><tr><th>時刻</th><th>きっかけ</th><th>結果</th></tr></thead>
-          <tbody id="logTableBody"></tbody>
-        </table>
-      </div>
+      <p class="note">こちらは<strong>翌朝の「朝の時刻」に自動で戻ります。</strong>ふだんの一時停止はこちら。claude.ai上のウィジェットの 🔔 からも押せます。</p>
     </section>
 
-    <section class="card card--full">
+    <section class="card card--acct" id="acctBar">
       <div class="card-head">
         <span class="card-num">5</span>
+        <h2>どのアカウントの数字か</h2>
+      </div>
+      <div class="acct-now">
+        <span class="acct-main" id="acctMain">読み込み中…</span>
+        <span class="acct-sub" id="acctSub"></span>
+      </div>
+      <div class="row">
+        <button id="acctRefreshBtn" type="button">取得し直す</button>
+      </div>
+      <label>
+        自動で取れないときの表示名（手入力）
+        <input type="text" id="accountManual" placeholder="例：小林（EXE MATE）">
+      </label>
+      <p class="note">claude.aiのページからメールアドレスを読み取れたときは<strong>そちらを優先</strong>します。読み取れないときだけ、ここに書いた名前を使います。<strong>空のままでも動きます</strong>（「アカウント不明」と出ます）。</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <span class="card-num">6</span>
         <h2>設定のバックアップ（CSV）</h2>
       </div>
       <div class="row">
@@ -120,10 +135,31 @@
         <input type="file" id="importFile" accept=".csv" style="display:none">
       </div>
       <span id="importResult" class="result"></span>
-      <p class="note">⚠️ エクスポートしたCSVにはAPIトークンがそのまま含まれます。保管・共有には注意してください。インポートは画面に反映するだけで、内容を確認して下の「保存する」を押すまで実際の設定には反映されません。</p>
+      <p class="note">⚠️ CSVにはAPIトークンがそのまま入ります。保管・共有に注意してください。インポートは画面に反映するだけで、「保存する」を押すまで実際の設定には入りません。</p>
     </section>
 
   </div>
+
+  <section class="card card--log">
+    <div class="card-head">
+      <span class="card-num">7</span>
+      <h2>動作ログ（診断用）</h2>
+    </div>
+    <p class="note">使用量データを取得するたびに記録されます。「新規タブを作成」は画面が一瞬切り替わる動作、それ以外（既存タブ利用／一時流用）は新しいタブを開かずに取得できたことを示します。</p>
+    <div class="row">
+      <button id="refreshLogBtn" type="button">更新</button>
+      <button id="copyFailLogBtn" type="button">失敗だけコピー</button>
+      <button id="copyLogBtn" type="button">全部コピー</button>
+      <button id="clearLogBtn" type="button">クリア</button>
+      <span id="copyResult" class="result"></span>
+    </div>
+    <div class="log-table-wrap">
+      <table class="log-table">
+        <thead><tr><th>時刻</th><th>きっかけ</th><th>結果</th></tr></thead>
+        <tbody id="logTableBody"></tbody>
+      </table>
+    </div>
+  </section>
 
   <div class="row save-row">
     <button id="saveBtn" type="button" class="primary">保存する</button>

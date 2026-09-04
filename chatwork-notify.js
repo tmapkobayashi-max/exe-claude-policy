@@ -12,7 +12,15 @@ const CW_DEFAULTS = {
   morningTime: '09:00',
   eveningTime: '17:00',
   skipWeekend: true,
-  skipHoliday: true
+  skipHoliday: true,
+  // ---- 通知を止めるしくみ（2026/9/4）----
+  // 2つある。役割が違うので分けている。
+  //   notificationsMuted … 自分で戻すまでずっとオフ（マスタースイッチ）
+  //   snoozeUntil        … その日ぶんだけオフ。翌朝の定時レポートの時刻に自動で戻る
+  // 「戻し忘れて静かに止まったまま」を避けたいので、日常の一時停止はスヌーズのほうを使う。
+  notificationsMuted: false,
+  snoozeUntil: 0,
+  accountManual: ''
 };
 
 const METRIC_KEYS = ['currentSession', 'allModels', 'modelSpecific'];
@@ -161,6 +169,71 @@ async function cwGetSettings() {
   return { ...CW_DEFAULTS, ...stored };
 }
 
+// ---- 通知を止めるしくみ（2026/9/4）----
+
+// 「今日はもう送らない」を押したとき、いつまで止めるかを決める。
+// 翌日の「朝の定時レポートの時刻」まで。
+// ⚠️ 0時に戻す作りにはしない。深夜にしきい値アラートが鳴る形になるため
+//    （2026/9/1にLINE配信枠の通知が0:36に鳴って直したのと同じ話）。
+function computeSnoozeUntil(morningTime, now = new Date()) {
+  const [h, m] = String(morningTime || '09:00').split(':').map(n => parseInt(n, 10));
+  const until = new Date(now);
+  until.setDate(until.getDate() + 1);
+  until.setHours(Number.isFinite(h) ? h : 9, Number.isFinite(m) ? m : 0, 0, 0);
+  return until.getTime();
+}
+
+// 送ってよいか。止まっているときは理由も返す（画面に出すため）。
+function notificationGate(settings, now = Date.now()) {
+  if (settings.notificationsMuted) {
+    return { blocked: true, reason: 'muted', text: '通知を全部止める がオンです' };
+  }
+  const until = Number(settings.snoozeUntil) || 0;
+  if (until > now) {
+    return { blocked: true, reason: 'snoozed', until, text: `今日は送りません（${formatSnoozeUntil(until)}に再開）` };
+  }
+  return { blocked: false };
+}
+
+function formatSnoozeUntil(ts) {
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${d.getMonth() + 1}/${d.getDate()} ${hh}:${mm}`;
+}
+
+// ---- どのアカウントの数字か（2026/9/4）----
+// 数字だけだと、誰の数字かが見えない。アカウントを切り替えると黙って別人の数字が出る。
+// ⭐ 毎回「同じです」と書くと読み飛ばされるので、変わったときだけ1行出す
+//    （0件でも鳴らす通知と同じ考え方で、変化にだけ意味を持たせる）。
+// 🚫 非公開API（/api/bootstrap 等）は使わない。黙って壊れるため。
+//    ページ本文から拾えなければ「アカウント不明」として扱い、それも「変化」として1回だけ知らせる。
+// ⚠️ 「見る」と「覚える」を分けている（peek / commit）。
+// 1つの関数で読んだ瞬間に覚えてしまうと、
+// 「しきい値を超えていないので結局1通も送らなかった」回で変化を食べてしまい、
+// あとの定時レポートで知らせられなくなる。**送れたときだけ覚える。**
+async function peekAccountChange(usageData) {
+  // 自動で読み取れたものを優先。ダメなら設定画面の手入力を使う。
+  // ⚠️ どちらも無ければ null（＝「アカウント不明」）。黙って空にはしない。
+  const { accountManual } = await chrome.storage.local.get(['accountManual']);
+  const current = (usageData && usageData.account) || (accountManual || '').trim() || null;
+  const { cwLastSeenAccount } = await chrome.storage.local.get(['cwLastSeenAccount']);
+  const first = cwLastSeenAccount === undefined;
+  const previous = first ? null : cwLastSeenAccount;
+
+  if (!first && previous === current) return { line: '', current, changed: false };
+
+  const label = current || 'アカウント不明';
+  const line = first
+    ? `👤 このレポートのアカウント：${label}`
+    : `🔴 アカウントが変わりました：${label}（前回：${previous || 'アカウント不明'}）`;
+  return { line, current, changed: true };
+}
+
+async function commitAccount(current) {
+  await chrome.storage.local.set({ cwLastSeenAccount: current === undefined ? null : current });
+}
+
 async function sendChatworkMessage(token, roomId, body) {
   const res = await fetch(`https://api.chatwork.com/v2/rooms/${encodeURIComponent(roomId)}/messages`, {
     method: 'POST',
@@ -179,7 +252,7 @@ async function sendChatworkMessage(token, roomId, body) {
 
 // ---- しきい値通知 ----
 
-async function checkOneMetricThreshold(metricKey, usageData, settings) {
+async function checkOneMetricThreshold(metricKey, usageData, settings, accountLine = '') {
   const metric = usageData[metricKey];
   if (!metric || typeof metric.percentage !== 'number') return;
 
@@ -191,8 +264,11 @@ async function checkOneMetricThreshold(metricKey, usageData, settings) {
     if (!alreadyNotified) {
       const label = labelFor(metricKey, metric);
       const remainPct = 100 - metric.percentage;
-      const body = `[info][title]🔴 Claude使用量アラート｜${label}[/title]使用${metric.percentage}%／残り${remainPct}% ${usageBar(metric.percentage)}（しきい値 ${settings.thresholdPercent}% に到達）
-リセット：${formatResetDetail(metric.reset, usageData.capturedAt)}[/info]`;
+      const bodyLines = [`[info][title]🔴 Claude使用量アラート｜${label}[/title]`];
+      if (accountLine) bodyLines.push(accountLine);
+      bodyLines.push(`使用${metric.percentage}%／残り${remainPct}% ${usageBar(metric.percentage)}（しきい値 ${settings.thresholdPercent}% に到達）`);
+      bodyLines.push(`リセット：${formatResetDetail(metric.reset, usageData.capturedAt)}[/info]`);
+      const body = bodyLines.join('\n');
       // ★送る前にフラグを立てる（2026/8/25）。
       // 送ってから立てると、送信中（数百ミリ秒）に入ってきた別の呼び出しが
       // 「まだ通知していない」と読んでしまい、同じアラートが2通出る。
@@ -201,6 +277,7 @@ async function checkOneMetricThreshold(metricKey, usageData, settings) {
       try {
         await sendChatworkMessage(settings.chatworkToken, settings.chatworkRoomId, body);
         console.log('[Claude Usage] Threshold notification sent for', metricKey);
+        return true;
       } catch (err) {
         await chrome.storage.local.set({ [flagKey]: false });
         console.error('[Claude Usage] Failed to send threshold notification:', err);
@@ -210,6 +287,7 @@ async function checkOneMetricThreshold(metricKey, usageData, settings) {
     // しきい値を下回った＝リセットされたとみなし、次のサイクルに備えてフラグを戻す
     await chrome.storage.local.set({ [flagKey]: false });
   }
+  return false;
 }
 
 // ★同時に走らせない（2026/8/25）。
@@ -236,18 +314,37 @@ async function checkThresholdAndNotifyInner(usageData) {
   const settings = await cwGetSettings();
   if (!settings.thresholdEnabled || !settings.chatworkToken || !settings.chatworkRoomId) return;
 
+  // 止めているあいだは送らない。⚠️ フラグ（cwNotified_*）は触らない。
+  // ここで下げてしまうと、再開したときに超過中の項目がもう一度鳴る。
+  const gate = notificationGate(settings);
+  if (gate.blocked) {
+    console.log('[Claude Usage] Threshold notification suppressed:', gate.reason);
+    return;
+  }
+
   const metrics = settings.thresholdMetrics || {};
+  // アカウント行は1回だけ載せる。複数の項目が同時に超えても、知らせるのは最初の1通でよい。
+  const acct = await peekAccountChange(usageData);
+  let accountLine = acct.line;
   for (const metricKey of METRIC_KEYS) {
     if (!metrics[metricKey]) continue;
-    await checkOneMetricThreshold(metricKey, usageData, settings);
+    const sent = await checkOneMetricThreshold(metricKey, usageData, settings, accountLine);
+    // 実際に送れた回だけ、アカウント行を使い切ったことにする
+    if (sent && accountLine) {
+      await commitAccount(acct.current);
+      accountLine = '';
+    }
   }
 }
 
 // ---- 定時レポート ----
 
-function formatReportMessage(usageData, label) {
+function formatReportMessage(usageData, label, accountLine = '') {
   const capturedAt = usageData && usageData.capturedAt;
   const lines = [`[info][title]Claude使用量レポート（${label}）[/title]`];
+  // アカウント行は「変わったときだけ」入る（accountChangeLine が空文字を返す）。
+  // いちばん上に置く。数字を読む前に「誰の数字か」が目に入る順番にするため。
+  if (accountLine) lines.push(accountLine);
   let any = false;
   for (const key of METRIC_KEYS) {
     const m = usageData && usageData[key];
@@ -336,6 +433,14 @@ async function sendDailyReport(label) {
   const slot = slotFromLabel(label);
   if (!settings.dailyReportEnabled || !settings.chatworkToken || !settings.chatworkRoomId) return;
 
+  const gate = notificationGate(settings);
+  if (gate.blocked) {
+    console.log('[Claude Usage] Daily report suppressed:', gate.reason, label);
+    await clearRetryState(slot);
+    await logTabEvent(`daily-report-${slot}`, `skipped-${gate.reason}`);
+    return;
+  }
+
   const today = new Date();
   if (await isWeekendOrHoliday(today, settings)) {
     console.log('[Claude Usage] Skip daily report (weekend/holiday):', today.toDateString());
@@ -348,8 +453,10 @@ async function sendDailyReport(label) {
 
   try {
     const { usageData } = await fetchUsageDataFromPage(reason);
-    const body = formatReportMessage(usageData, label);
+    const acct = await peekAccountChange(usageData);
+    const body = formatReportMessage(usageData, label, acct.line);
     await sendChatworkMessage(settings.chatworkToken, settings.chatworkRoomId, body);
+    if (acct.changed) await commitAccount(acct.current);
     console.log('[Claude Usage] Daily report sent:', label, attempt ? `(retry ${attempt})` : '');
     await clearRetryState(slot);
     // 定時レポートのタイミングでしきい値も合わせてチェックしておく

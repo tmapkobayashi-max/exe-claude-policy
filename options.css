@@ -3,34 +3,53 @@ body {
   background: #eeece6;
   color: #222;
   margin: 0;
-  padding: 32px;
+  padding: 20px 24px 28px;
 }
-.wrap { max-width: 880px; margin: 0 auto; }
-h1 { font-size: 20px; margin: 0 0 22px; }
+/* ★2026/9/4：880px で真ん中に細長く置いていたのをやめ、画面幅を使い切る。
+   縦に長いほどスクロールが増えるので、横に広げて縦を短くするほうが指が疲れない。 */
+.wrap { max-width: 1760px; margin: 0 auto; }
+h1 { font-size: 19px; margin: 0 0 14px; }
 h1 .sub { display: block; font-size: 13px; color: #8a6d3b; font-weight: normal; margin-top: 4px; }
 
+/* ★2026/9/4：grid をやめて段組みにした。
+   grid は行の高さが揃ってしまい、背の低いカードの下に大きな空きができる。
+   columns なら上から順に詰まるので、凸凹のままパズルのようにはまる。
+   ⚠️ 読む順は「上から下 → 次の列」になる。番号を振ってあるのはそのため。 */
 .grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 18px;
-  align-items: start;
+  /* ★2026/9/4（2回目）：column-width だと、幅によって列の数と幅が変わり、
+     右側に半端な余りが出ていた。列の数を決め打ちして3等分にする。 */
+  column-count: 3;
+  column-gap: 16px;
 }
+/* 狭い画面では段を減らす（3列のままだと1列が細くなりすぎる） */
+@media (max-width: 1180px) { .grid { column-count: 2; } }
+@media (max-width: 780px)  { .grid { column-count: 1; } }
 
 .card {
   background: #fff;
   border: 1px solid #e6e2d8;
   border-radius: 12px;
-  padding: 20px 22px 22px;
+  padding: 15px 17px 17px;
   box-shadow: 0 1px 2px rgba(30, 24, 8, 0.04), 0 4px 14px rgba(30, 24, 8, 0.05);
+  /* 段の途中で割れないようにする。inline-block + width:100% は
+     column レイアウトでカードを割らせないための定番の書き方。 */
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  page-break-inside: avoid;
+  display: inline-block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 16px;
 }
-.card--full { grid-column: 1 / -1; }
+/* 動作ログは表が入るので、段組みの外に出して幅いっぱいで使う */
+.card--log { display: block; margin: 0; }
 
 .card-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
+  gap: 9px;
+  margin-bottom: 12px;
+  padding-bottom: 9px;
   border-bottom: 1px solid #f0ede4;
 }
 .card-num {
@@ -52,7 +71,7 @@ label {
   display: block;
   font-size: 13px;
   color: #444;
-  margin-bottom: 12px;
+  margin-bottom: 9px;
 }
 label input[type="text"],
 label input[type="password"],
@@ -76,7 +95,17 @@ label.checkbox {
 label.checkbox input { margin: 0; }
 .row { display: flex; align-items: center; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
 .row.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.row.save-row { margin: 22px 0 0; }
+/* 「保存する」は下端に貼り付けて、どこまでスクロールしても押せるようにする */
+.row.save-row {
+  position: sticky;
+  bottom: 0;
+  margin: 16px 0 0;
+  padding: 12px 16px;
+  background: rgba(238, 236, 230, 0.94);
+  backdrop-filter: blur(6px);
+  border-top: 1px solid #ddd8cc;
+  border-radius: 10px;
+}
 
 button {
   font-size: 13px;
@@ -126,3 +155,25 @@ button:hover { opacity: .88; }
 .log-table td.log-flash { color: #b3261e; font-weight: bold; }
 .log-table td.log-fail { color: #b3261e; }
 .log-empty { color: #8a8577; text-align: center; padding: 16px 0 !important; white-space: normal !important; }
+
+/* ---- 通知を止める（2026/9/4）---- */
+.card--mute { border-left: 4px solid #fc6265; }
+.card--mute.is-muted { background: #fff5f5; }
+.checkbox--strong { font-size: 14px; }
+#snoozeState.is-active { color: #fc6265; font-weight: 600; }
+
+/* ---- どのアカウントの数字か（2026/9/4）---- */
+.card--acct { border-left: 4px solid #cfc7b5; }
+.card--acct.is-unknown { border-left-color: #e0a800; }
+.card--acct.is-pending { border-left-color: #fc6265; }
+.acct-now {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 11px;
+  background: #faf9f5;
+  border-radius: 8px;
+  margin-bottom: 4px;
+}
+.acct-main { font-weight: 600; font-size: 14px; word-break: break-all; }
+.acct-sub { color: #7a7264; font-size: 12px; line-height: 1.6; }

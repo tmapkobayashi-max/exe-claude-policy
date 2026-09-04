@@ -1,0 +1,3 @@
+
+# Pythonの実行キャッシュ（tools/check_js.py 由来）
+__pycache__/
