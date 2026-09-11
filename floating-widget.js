@@ -603,25 +603,33 @@
     const data = { currentSession: null, allModels: null, modelSpecific: null };
 
     const isSessionLabel = (l) => /現在のセッション/.test(l) || /^Current\s+session/i.test(l);
-    const isAllModelsLabel = (l) => /すべてのモデル/.test(l) || /^All\s+models/i.test(l);
+    // 2026/9/11：「すべてのモデル」→「今週」、「◯◯にリセット」→「◯◯にリセットされます」（content.js と同じ）
+    const isAllModelsLabel = (l) => /すべてのモデル/.test(l) || /^今週$/.test(l) || /^All\s+models/i.test(l) || /^This\s+week$/i.test(l);
+    const matchReset = (line) => {
+      const ja = line.match(/(?:^|・)\s*([^・]+?)にリセット(?:されます)?\s*$/);
+      if (ja) return ja[1].trim();
+      const en = line.match(/(?:^|[·•])\s*Resets?\s+(?:in\s+|at\s+|on\s+)?(.+)$/i);
+      return en ? en[1].trim() : null;
+    };
+    const modelName = (l) => l.replace(/^今週の\s*/, '').replace(/\s+this\s+week$/i, '').trim() || l;
 
     for (let i = 0; i < lines.length - 2; i++) {
       const label = lines[i];
       const resetLine = lines[i + 1];
       const pctLine = lines[i + 2];
 
-      const resetMatch = resetLine.match(/^(.+?)にリセット$/) || resetLine.match(/^Resets?\s+in\s+(.+)$/i);
+      const reset = matchReset(resetLine);
       const pctMatch = pctLine.match(/^(\d+)\s*%\s*(使用済み|used)?/i);
-      if (!resetMatch || !pctMatch) continue;
+      if (!reset || !pctMatch) continue;
 
-      const entry = { percentage: parseInt(pctMatch[1], 10), reset: resetMatch[1].trim() };
+      const entry = { percentage: parseInt(pctMatch[1], 10), reset };
 
       if (isSessionLabel(label) && !data.currentSession) {
         data.currentSession = entry;
       } else if (isAllModelsLabel(label) && !data.allModels) {
         data.allModels = entry;
       } else if (!data.modelSpecific) {
-        data.modelSpecific = { ...entry, name: label };
+        data.modelSpecific = { ...entry, name: modelName(label) };
       }
       i += 2;
     }

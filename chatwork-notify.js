@@ -104,9 +104,9 @@ function parseRelativeReset(resetStr) {
   return ((+m[1] || 0) * 24 * 60 + (+m[2] || 0) * 60 + (+m[3] || 0)) * 60000;
 }
 
-// "22:00 (水)" → 基準時刻より後にくる直近のその曜日・時刻
+// "22:00 (水)" "22:00 (水曜日)" "22:00（水）" → 基準時刻より後にくる直近のその曜日・時刻
 function parseWeekdayReset(resetStr, baseMs) {
-  const m = (resetStr || '').match(/^(\d{1,2}):(\d{2})\s*\(([日月火水木金土])\)$/);
+  const m = (resetStr || '').match(/^(\d{1,2}):(\d{2})\s*[(（]([日月火水木金土])(?:曜日?)?[)）]$/);
   if (!m) return null;
   const base = new Date(baseMs);
   for (let i = 0; i < 8; i++) {
@@ -116,12 +116,40 @@ function parseWeekdayReset(resetStr, baseMs) {
   return null;
 }
 
+// "13:00"（時刻だけ・2026/9/11〜の書き方）→ 基準時刻より後にくる直近のその時刻
+function parseClockReset(resetStr, baseMs) {
+  const m = (resetStr || '').match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const base = new Date(baseMs);
+  for (let i = 0; i < 2; i++) {
+    const c = new Date(base.getFullYear(), base.getMonth(), base.getDate() + i, +m[1], +m[2], 0, 0);
+    if (c.getTime() >= baseMs) return c.getTime();
+  }
+  return null;
+}
+
+// "9月13日 20:00" "9月13日(土) 20:00" → その日時（年をまたぐときは翌年）
+function parseDateReset(resetStr, baseMs) {
+  const m = (resetStr || '').match(/^(\d{1,2})月(\d{1,2})日\s*(?:[(（][日月火水木金土](?:曜日?)?[)）])?\s*(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const base = new Date(baseMs);
+  let c = new Date(base.getFullYear(), +m[1] - 1, +m[2], +m[3], +m[4], 0, 0);
+  if (c.getTime() < baseMs - 24 * 60 * 60 * 1000) {
+    c = new Date(base.getFullYear() + 1, +m[1] - 1, +m[2], +m[3], +m[4], 0, 0);
+  }
+  return c.getTime();
+}
+
 // 取得時点の表記 → 絶対時刻(ms)。解釈できなければ null
 function resolveResetAt(resetStr, capturedAt) {
   const base = typeof capturedAt === 'number' ? capturedAt : Date.now();
   const rel = parseRelativeReset(resetStr);
   if (rel !== null) return base + rel;
-  return parseWeekdayReset(resetStr, base);
+  const wd = parseWeekdayReset(resetStr, base);
+  if (wd !== null) return wd;
+  const dt = parseDateReset(resetStr, base);
+  if (dt !== null) return dt;
+  return parseClockReset(resetStr, base);
 }
 
 function formatHM(ms) {
@@ -353,15 +381,35 @@ function formatReportMessage(usageData, label, accountLine = '') {
   // アカウント行は「変わったときだけ」入る（accountChangeLine が空文字を返す）。
   // いちばん上に置く。数字を読む前に「誰の数字か」が目に入る順番にするため。
   if (accountLine) lines.push(accountLine);
+  // ---- 読めなかった項目も、行を消さずに残す（2026/9/8）----
+  // 以前は読めた項目だけを並べていたので、行が1本消えるという同じ見た目に
+  //   ❶ その枠がいま無い　❷ ページの書式が変わって拾えなくなった
+  // の2つが混ざっていた。❷は黙って壊れるので気づけない（2026/9/8朝、朝レポートから
+  // セッションの行だけが消えて理由が分からなかった）。
+  // ⚠️ 0%はここへ来ない。0は数値なので上の分岐で普通に出る（残り100%＝🟢）。
+  // ⚠️ 断定しない。こちらに分かるのは「読めなかった」までで、動いていないかどうかは分からない。
+  // 🚫 modelSpecificには置き換え行を作らない。固定名を持たない（名前はページ側から来る）ため、
+  //    読めなかったときに何と名乗ればよいかが決まらない。
   let any = false;
+  let missing = 0;
+  const rows = [];
   for (const key of METRIC_KEYS) {
     const m = usageData && usageData[key];
     if (m && typeof m.percentage === 'number') {
       any = true;
-      lines.push(formatMetricLine(shortLabelFor(key, m), m, capturedAt));
+      rows.push(formatMetricLine(shortLabelFor(key, m), m, capturedAt));
+    } else if (SHORT_LABELS[key]) {
+      missing++;
+      rows.push(`⚪ ${SHORT_LABELS[key]} 読み取れませんでした`);
     }
   }
-  if (!any) lines.push('使用量データを取得できませんでした。');
+  // 1つも読めなかった回は、置き換え行を並べるより1文のほうが伝わる。
+  if (any) lines.push(...rows);
+  else lines.push('使用量データを取得できませんでした。');
+  // 一部だけ読めなかった回は、何を疑えばよいかを1行添える（2026/9/11）。
+  // 9/11朝は「⚪ 読み取れませんでした」が並んだが、原因（ページの書き方の変化）は
+  // レポートを見ても分からなかった。
+  if (any && missing) lines.push('⚠ 読み取れない項目があります。claude.aiの画面の書き方が変わった可能性があります（拡張機能の直しが要るかもしれません）');
   // いつ時点の数値かを必ず添える。古い値が混ざったときに人が気づける唯一の手掛かりになる。
   if (any && typeof capturedAt === 'number') lines.push(`（数値の取得：${formatHM(capturedAt)}）`);
   lines.push('[/info]');
@@ -436,6 +484,25 @@ async function handleDailyReportRetryAlarm(alarmName, scheduledTime) {
   await sendDailyReport(labelFromSlot(slot));
 }
 
+// 定時レポートをあきらめたときに Chatwork へ送る文面
+function formatGiveUpMessage(label, err) {
+  const tries = DAILY_REPORT_MAX_RETRIES + 1;
+  const detail = String((err && err.message) || err || '').replace(/\s+/g, ' ').slice(0, 160);
+  const lines = [
+    `[info][title]⚠ Claude使用量レポート（${label}）を送れませんでした[/title]`,
+    `使用量ページから数字を読み取れませんでした（${tries}回ためして、最後は ${formatHM(Date.now())}）。`,
+    '次の定時レポートで、もう一度ためします。',
+    '[hr]',
+    '■ 確かめること',
+    '・このChromeで claude.ai にログインしたままか',
+    '・https://claude.ai/settings/usage を開いて、数字が出ているか',
+    '・数字が出ているのに読めないときは、ページの書き方が変わった可能性があります（拡張機能の直しが要ります）'
+  ];
+  if (detail) lines.push('[hr]', `理由：${detail}`);
+  lines.push('[/info]');
+  return lines.join('\n');
+}
+
 async function sendDailyReport(label) {
   const settings = await cwGetSettings();
   const slot = slotFromLabel(label);
@@ -483,6 +550,17 @@ async function sendDailyReport(label) {
       console.error('[Claude Usage] Daily report giving up after retries:', slot);
       await clearRetryState(slot);
       await logTabEvent(reason, 'gave-up-after-retries');
+      // さらに Chatwork にも知らせる（2026/9/11）。
+      // 以前はここで黙って終わっていたので、「レポートが来ない」ことに人が気づくまで分からなかった
+      // （9/11朝：EXE MATE側は3回とも読めず、ルームには何も届かなかった）。
+      // ⚠️ 送れなかった原因が Chatwork 側（トークン・通信）なら、この通知も届かない。それでも1回だけ試す。
+      try {
+        await sendChatworkMessage(settings.chatworkToken, settings.chatworkRoomId, formatGiveUpMessage(label, err));
+        await logTabEvent(reason, 'gave-up-notified');
+      } catch (notifyErr) {
+        console.error('[Claude Usage] Give-up notice also failed:', notifyErr);
+        await logTabEvent(reason, 'gave-up-notify-failed');
+      }
     }
   }
 }

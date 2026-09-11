@@ -123,7 +123,9 @@ const OUTCOME_LABELS = {
   'created-new-tab-inject-failed': '新規タブ作成→スクリプト注入失敗',
   'retry-scheduled-1': '取得失敗→60秒後に再試行を予約（1回目）',
   'retry-scheduled-2': '取得失敗→60秒後に再試行を予約（2回目）',
-  'gave-up-after-retries': '再試行しても取得できず、レポート送信を断念'
+  'gave-up-after-retries': '再試行しても取得できず、レポート送信を断念',
+  'gave-up-notified': '→ Chatworkへ「読み取れませんでした」を通知',
+  'gave-up-notify-failed': '→ Chatworkへのエラー通知も送れなかった'
 };
 
 function formatLogTime(ts) {
@@ -133,7 +135,8 @@ function formatLogTime(ts) {
 }
 
 function outcomeClass(outcome) {
-  if (outcome === 'gave-up-after-retries') return 'log-fail';
+  if (outcome === 'gave-up-after-retries' || outcome === 'gave-up-notify-failed') return 'log-fail';
+  if (outcome === 'gave-up-notified') return 'log-flash';
   if (outcome.startsWith('retry-scheduled')) return 'log-flash';
   if (outcome.startsWith('created-new-tab')) return 'log-flash';
   if (outcome.includes('failed')) return 'log-fail';
@@ -168,7 +171,9 @@ async function renderLog() {
 function isTroubleOutcome(outcome) {
   return outcome.includes('failed')
     || outcome.startsWith('retry-scheduled')
-    || outcome === 'gave-up-after-retries';
+    || outcome === 'gave-up-after-retries'
+    || outcome === 'gave-up-notified'
+    || outcome === 'gave-up-notify-failed';
 }
 
 // 表と同じ3列を、そのまま貼り付けられるタブ区切りテキストにする

@@ -47,23 +47,51 @@ function extractUsageData() {
   return data;
 }
 
+// ---- ページの書き方の変化を吸収する（2026/9/11）----
+// 2026/9/11の朝、使用量ページの書き方が変わり、朝のレポートが読めなくなった。
+//   ❶ リセット行：「13:00にリセット」→「13:00にリセットされます」（行末の一致が外れた）
+//   ❷ 週次の全体枠の名前：「すべてのモデル」→「今週」
+//   ❸ モデル別の枠：「今週のFable」＋リセット行の前に説明
+//      （「Fableには別の週間上限があります・20:00にリセットされます」）
+// アカウントによって新旧どちらの書き方も出るので、両方を受ける。
+
+// リセット行から、時刻の部分だけを取り出す。取れなければ null
+function matchResetLine(line) {
+  const ja = line.match(/(?:^|・)\s*([^・]+?)にリセット(?:されます)?\s*$/);
+  if (ja) return ja[1].trim();
+  const en = line.match(/(?:^|[·•])\s*Resets?\s+(?:in\s+|at\s+|on\s+)?(.+)$/i);
+  if (en) return en[1].trim();
+  return null;
+}
+
+// 週次の全体枠か
+function isAllModelsLabelText(l) {
+  return /すべてのモデル/.test(l) || /^今週$/.test(l) || /^All\s+models/i.test(l) || /^This\s+week$/i.test(l);
+}
+
+// 「今週のFable」→「Fable」（Chatworkでは「週次・Fable」と出る）
+function modelNameFromLabel(l) {
+  const name = l.replace(/^今週の\s*/, '').replace(/\s+this\s+week$/i, '').trim();
+  return name || l;
+}
+
 function parseUsageBlocks(pageText) {
   const lines = pageText.split(/\n+/).map(s => s.trim()).filter(Boolean);
   const data = { currentSession: null, allModels: null, modelSpecific: null };
 
   const isSessionLabel = (l) => /現在のセッション/.test(l) || /^Current\s+session/i.test(l);
-  const isAllModelsLabel = (l) => /すべてのモデル/.test(l) || /^All\s+models/i.test(l);
+  const isAllModelsLabel = isAllModelsLabelText;
 
   for (let i = 0; i < lines.length - 2; i++) {
     const label = lines[i];
     const resetLine = lines[i + 1];
     const pctLine = lines[i + 2];
 
-    const resetMatch = resetLine.match(/^(.+?)にリセット$/) || resetLine.match(/^Resets?\s+in\s+(.+)$/i);
+    const reset = matchResetLine(resetLine);
     const pctMatch = pctLine.match(/^(\d+)\s*%\s*(使用済み|used)?/i);
-    if (!resetMatch || !pctMatch) continue;
+    if (!reset || !pctMatch) continue;
 
-    const entry = { percentage: parseInt(pctMatch[1], 10), reset: resetMatch[1].trim() };
+    const entry = { percentage: parseInt(pctMatch[1], 10), reset };
 
     if (isSessionLabel(label) && !data.currentSession) {
       data.currentSession = entry;
@@ -71,7 +99,7 @@ function parseUsageBlocks(pageText) {
       data.allModels = entry;
     } else if (!data.modelSpecific) {
       // 週間制限のうち「すべてのモデル」とは別枠で個別表示されているモデル（例：Fable、Opus等）
-      data.modelSpecific = { ...entry, name: label };
+      data.modelSpecific = { ...entry, name: modelNameFromLabel(label) };
     }
     i += 2; // このブロック分は読み飛ばす
   }
